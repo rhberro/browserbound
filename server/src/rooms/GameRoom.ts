@@ -2,7 +2,7 @@ import { Room, Client } from 'colyseus';
 import { Schema, type, MapSchema } from '@colyseus/schema';
 import { POWER_SCALE, GRAVITY, TerrainOp, MAP_WIDTH, MAP_HEIGHT, DEFAULT_CRATER_RADIUS, applyOpToBitmap } from '@browserbond/shared';
 import { PhysicsAdapter, Wind } from '@browserbond/shared/src/adapters/PhysicsAdapter';
-import { WindManager } from './adapters';
+import { WindManager } from '../adapters/WindManager.ts';
 
 
 class Player extends Schema {
