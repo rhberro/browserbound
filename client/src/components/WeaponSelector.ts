@@ -2,11 +2,14 @@ import { InputAdapter } from '../adapters/InputAdapter';
 
 /**
  * WeaponSelector: Displays weapon selection buttons (1/2/3).
- * Attaches listeners directly to button elements.
+ *
+ * The DOM is built once in mount(); update() only patches the selected
+ * styling so the buttons stay clickable across frames.
  */
 export class WeaponSelector {
   private container: HTMLElement | null = null;
   private inputAdapter: InputAdapter;
+  private buttons: HTMLButtonElement[] = [];
 
   constructor(inputAdapter: InputAdapter) {
     this.inputAdapter = inputAdapter;
@@ -26,68 +29,56 @@ export class WeaponSelector {
       flex-direction: column;
       gap: 8px;
     `;
+
+    this.container.innerHTML = `
+      <label style="font-size: 10px; text-transform: uppercase; color: var(--color-neutral-500);">Weapon</label>
+      <div id="weapon-buttons" style="display: flex; gap: 4px;"></div>
+    `;
     parent.appendChild(this.container);
+
+    const row = this.container.querySelector('#weapon-buttons') as HTMLElement;
+    for (let i = 1; i <= 3; i++) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.id = `weapon-${i}-btn`;
+      btn.textContent = String(i);
+      btn.style.cssText = `
+        padding: 8px 14px;
+        border: 1px solid var(--color-neutral-700);
+        background: transparent;
+        color: var(--color-text);
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 12px;
+        font-weight: 400;
+        transition: all 0.1s;
+        user-select: none;
+      `;
+      btn.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        this.inputAdapter.selectWeapon(i);
+        this.update();
+      });
+      row.appendChild(btn);
+      this.buttons.push(btn);
+    }
 
     this.update();
   }
 
   update(): void {
-    if (!this.container) return;
+    const selected = this.inputAdapter.getSelectedWeapon();
 
-    const selectedWeapon = this.inputAdapter.getSelectedWeapon();
+    this.buttons.forEach((btn, index) => {
+      const isSelected = index + 1 === selected;
+      const border = isSelected ? 'var(--color-accent)' : 'var(--color-neutral-700)';
+      const background = isSelected ? 'rgba(145, 132, 217, 0.1)' : 'transparent';
+      const weight = isSelected ? '600' : '400';
 
-    this.container.innerHTML = `
-      <label style="font-size: 10px; text-transform: uppercase; color: var(--color-neutral-500);">Weapon</label>
-      <div style="display: flex; gap: 4px;">
-        <button id="weapon-1-btn" style="
-          padding: 8px 14px;
-          border: 1px solid ${selectedWeapon === 1 ? 'var(--color-accent)' : 'var(--color-neutral-700)'};
-          background: ${selectedWeapon === 1 ? 'rgba(145, 132, 217, 0.1)' : 'transparent'};
-          color: var(--color-text);
-          border-radius: 4px;
-          cursor: pointer;
-          font-size: 12px;
-          font-weight: ${selectedWeapon === 1 ? '600' : '400'};
-          transition: all 0.1s;
-        ">1</button>
-        <button id="weapon-2-btn" style="
-          padding: 8px 14px;
-          border: 1px solid ${selectedWeapon === 2 ? 'var(--color-accent)' : 'var(--color-neutral-700)'};
-          background: ${selectedWeapon === 2 ? 'rgba(145, 132, 217, 0.1)' : 'transparent'};
-          color: var(--color-text);
-          border-radius: 4px;
-          cursor: pointer;
-          font-size: 12px;
-          font-weight: ${selectedWeapon === 2 ? '600' : '400'};
-          transition: all 0.1s;
-        ">2</button>
-        <button id="weapon-3-btn" style="
-          padding: 8px 14px;
-          border: 1px solid ${selectedWeapon === 3 ? 'var(--color-accent)' : 'var(--color-neutral-700)'};
-          background: ${selectedWeapon === 3 ? 'rgba(145, 132, 217, 0.1)' : 'transparent'};
-          color: var(--color-text);
-          border-radius: 4px;
-          cursor: pointer;
-          font-size: 12px;
-          font-weight: ${selectedWeapon === 3 ? '600' : '400'};
-          transition: all 0.1s;
-        ">3</button>
-      </div>
-    `;
-
-    this.attachListeners();
-  }
-
-  private attachListeners(): void {
-    for (let i = 1; i <= 3; i++) {
-      const btn = this.container?.querySelector(`#weapon-${i}-btn`) as HTMLButtonElement;
-      if (btn) {
-        btn.onclick = () => {
-          this.inputAdapter.selectWeapon(i);
-          this.update();
-        };
-      }
-    }
+      if (btn.style.borderColor !== border) btn.style.borderColor = border;
+      if (btn.style.background !== background) btn.style.background = background;
+      if (btn.style.fontWeight !== weight) btn.style.fontWeight = weight;
+    });
   }
 
   destroy(): void {

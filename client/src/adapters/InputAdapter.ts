@@ -9,6 +9,9 @@
  * - Movement and fire actions
  */
 
+/** How fast the power gauge fills, in percent per second. */
+const CHARGE_RATE_PER_SECOND = 40;
+
 export interface AimState {
   angle: number;
   power: number;
@@ -65,9 +68,9 @@ export class InputAdapter {
    * Update input state (called every frame).
    */
   update(deltaMS: number): void {
-    // Charge power while Space is pressed
+    // Charge power while the fire input is held (40%/sec -> 2.5s for a full bar)
     if (this.isCharging) {
-      this.aimPower = Math.min(100, this.aimPower + (deltaMS / 1000) * 50);
+      this.aimPower = Math.min(100, this.aimPower + (deltaMS / 1000) * CHARGE_RATE_PER_SECOND);
     }
 
     // Adjust aim angle with Up/Down arrows
@@ -190,14 +193,4 @@ export class InputAdapter {
     this.isCharging = false;
   }
 
-  /**
-   * Fire the weapon (called by HUD fire button or when shouldFire() is true).
-   */
-  fire(): void {
-    if (this.isCharging && this.aimPower > 0) {
-      this.isCharging = false;
-      this.gameState.fire(this.aimAngle, this.aimPower, this.selectedWeapon);
-      this.resetAfterFire();
-    }
-  }
 }

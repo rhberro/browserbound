@@ -1,4 +1,4 @@
-import { Projectile, ProjectileInput, GRAVITY, POWER_SCALE } from './types';
+import { Projectile, ProjectileInput, GRAVITY, POWER_SCALE, WIND_INTEGRATION } from './types';
 
 export class ProjectileSimulation {
   private position: { x: number; y: number };
@@ -21,10 +21,12 @@ export class ProjectileSimulation {
       y: -Math.sin(input.angle) * speed,
     };
 
-    // Wind force in pixels/frame
+    // windSpeed arrives as the networked value (wind magnitude * 100); scale it
+    // back down so this matches PhysicsAdapter.updateAllProjectiles exactly.
+    const windAccel = (windSpeed / 100) * WIND_INTEGRATION;
     this.windForce = {
-      x: Math.cos(windDirection) * (windSpeed * 0.05),
-      y: Math.sin(windDirection) * (windSpeed * 0.05),
+      x: Math.cos(windDirection) * windAccel,
+      y: Math.sin(windDirection) * windAccel,
     };
   }
 
