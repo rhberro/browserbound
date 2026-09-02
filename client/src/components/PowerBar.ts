@@ -2,6 +2,7 @@ import { InputAdapter, AimState } from '../adapters/InputAdapter';
 
 /**
  * PowerBar: Displays power charging bar (0-100%) with divisions and last-used ghost bar.
+ * Last-used stays visible while charging and updates only on release.
  */
 export class PowerBar {
   private container: HTMLElement | null = null;
@@ -40,26 +41,34 @@ export class PowerBar {
 
     const aimState = this.inputAdapter.getAimState();
 
-    // Save power if charged
-    if (aimState.power > 0) {
+    // Save power only when releasing (not while charging)
+    if (!aimState.isCharging && aimState.power === 0 && this.lastPower !== this.inputAdapter.getAimState().power) {
+      // Power was just released - save it
+      if (this.lastPower > 0) {
+        localStorage.setItem('lastUsedPower', this.lastPower.toString());
+      }
+    } else if (aimState.isCharging) {
+      // While charging, track what would be saved on release
       this.lastPower = aimState.power;
-      localStorage.setItem('lastUsedPower', this.lastPower.toString());
     }
 
     // Generate division markers at 10%, 20%, etc.
-    let divisions = '';
-    for (let i = 1; i <= 10; i++) {
-      const percent = i * 10;
-      divisions += `<div style="
+    const divisions = Array.from({length: 10}, (_, i) => {
+      const percent = (i + 1) * 10;
+      return `<div style="
         position: absolute;
         left: ${percent}%;
-        top: -4px;
+        top: 0;
         width: 1px;
-        height: 4px;
+        height: 100%;
         background: var(--color-neutral-600);
-        opacity: 0.5;
+        opacity: 0.4;
+        z-index: 1;
       "></div>`;
-    }
+    }).join('');
+
+    // Get last used value from localStorage for display
+    const storedLastPower = parseFloat(localStorage.getItem('lastUsedPower') || '0');
 
     this.container.innerHTML = `
       <label style="font-size: 10px; text-transform: uppercase; color: var(--color-neutral-500);">Power</label>
@@ -70,37 +79,46 @@ export class PowerBar {
           background: var(--color-neutral-800);
           border: 1px solid var(--color-neutral-700);
           border-radius: 4px;
-          overflow: hidden;
+          overflow: visible;
           position: relative;
         ">
-          ${divisions}
-          <!-- Last used ghost bar -->
+          <div style="
+            position: absolute;
+            inset: 0;
+            display: flex;
+          ">
+            ${divisions}
+          </div>
+          <!-- Last used ghost bar (behind current) -->
           <div style="
             position: absolute;
             height: 100%;
-            width: ${this.lastPower}%;
+            width: ${storedLastPower}%;
             background: linear-gradient(90deg, var(--color-accent-600), var(--color-accent));
-            opacity: 0.2;
+            opacity: 0.25;
             transition: width 0.1s linear;
-            z-index: 1;
+            z-index: 2;
           "></div>
-          <!-- Current power bar -->
+          <!-- Current power bar (in front) -->
           <div style="
             position: absolute;
             height: 100%;
             width: ${aimState.power}%;
             background: linear-gradient(90deg, var(--color-accent-600), var(--color-accent));
             transition: width 0.05s linear;
-            z-index: 2;
+            z-index: 3;
           "></div>
         </div>
-        <div style="display: flex; flex-direction: column; align-items: flex-end; min-width: 45px;">
+        <div style="display: flex; flex-direction: column; align-items: flex-end; min-width: 50px;">
           <span style="font-weight: 600; font-size: 12px;">${aimState.power.toFixed(0)}%</span>
           <span style="
             font-size: 9px;
             color: var(--color-neutral-600);
             opacity: 0.6;
-          ">Last: ${this.lastPower.toFixed(0)}%</span>
+            height: 14px;
+            display: flex;
+            align-items: center;
+          ">Last: ${storedLastPower.toFixed(0)}%</span>
         </div>
       </div>
     `;
