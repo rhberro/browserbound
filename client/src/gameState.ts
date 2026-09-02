@@ -70,19 +70,16 @@ export class GameState {
         this.updateTurnState();
       });
     }
+
+    // Register message handlers once at connection time
+    this.registerMessageHandlers();
   }
 
-  private updateTurnState() {
-    if (!this.room?.state) return;
-    this.turnState = {
-      currentPlayerId: this.room.state.currentPlayerId,
-      windSpeed: this.room.state.windSpeed,
-      windDirection: this.room.state.windDirection,
-    };
+  private registerMessageHandlers(): void {
+    if (!this.room) return;
 
     this.room.onMessage('projectile', (data) => {
       this.projectiles.clear();
-      // Usar os IDs que o servidor envia
       if (data.projectileIds) {
         for (const id of data.projectileIds) {
           this.projectiles.set(id, { x: data.startX, y: data.startY });
@@ -98,7 +95,6 @@ export class GameState {
           proj.y = data.y;
         }
       } else {
-        // Backwards compatibility: se não tiver projectileId, atualizar o primeiro
         const firstProj = this.projectiles.values().next().value;
         if (firstProj) {
           firstProj.x = data.x;
@@ -121,11 +117,9 @@ export class GameState {
         }
       }
 
-      // Remove only the projectile that collided, not all of them
       if (data.projectileId) {
         this.projectiles.delete(data.projectileId);
       } else {
-        // If no specific projectile ID, clear all (fallback)
         this.projectiles.clear();
       }
     });
@@ -158,13 +152,21 @@ export class GameState {
       this.currentPlayerAimAngle = data.angle;
     });
 
-    // Listen for explicit wind change messages
     this.room.onMessage('windChanged', (data) => {
       if (this.turnState) {
         this.turnState.windSpeed = data.windSpeed;
         this.turnState.windDirection = data.windDirection;
       }
     });
+  }
+
+  private updateTurnState() {
+    if (!this.room?.state) return;
+    this.turnState = {
+      currentPlayerId: this.room.state.currentPlayerId,
+      windSpeed: this.room.state.windSpeed,
+      windDirection: this.room.state.windDirection,
+    };
   }
 
   setOnTerrainOp(callback: (op: TerrainOp) => void) {

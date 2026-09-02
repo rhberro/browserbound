@@ -67,7 +67,7 @@ export class RendererAdapter {
   /**
    * Update all player sprites and health bars.
    */
-  updatePlayers(gameState: any): void {
+  updatePlayers(gameState: any, aimState?: any): void {
     // Remove sprites for players that no longer exist
     for (const [playerId, sprite] of this.playerSprites) {
       if (!gameState.players.has(playerId)) {
@@ -107,7 +107,7 @@ export class RendererAdapter {
       }
 
       // Draw angle indicator for current player
-      this.updateAngleIndicator(playerId, player, gameState);
+      this.updateAngleIndicator(playerId, player, gameState, aimState);
     }
   }
 
@@ -144,7 +144,7 @@ export class RendererAdapter {
   /**
    * Update aim angle indicator arrow for current player.
    */
-  private updateAngleIndicator(playerId: string, player: any, gameState: any): void {
+  private updateAngleIndicator(playerId: string, player: any, gameState: any, aimState?: any): void {
     const isCurrentPlayer = playerId === gameState.turnState?.currentPlayerId;
 
     if (isCurrentPlayer) {
@@ -158,7 +158,7 @@ export class RendererAdapter {
       angleInd.clear();
       const facing = player.facing || 1;
       const isMyTurn = playerId === gameState.getRoomSessionId();
-      const angle = isMyTurn ? gameState.currentPlayerAimAngle : gameState.currentPlayerAimAngle;
+      const angle = isMyTurn && aimState ? aimState.angle : gameState.currentPlayerAimAngle;
       const relativeAngle = facing === 1 ? angle : 180 - angle;
       const radians = (relativeAngle * Math.PI) / 180;
 

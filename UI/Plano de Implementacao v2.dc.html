@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="_ds/nocturne-b2a8093f-61b4-473f-af7d-c17eedc75b03/styles.css">
+<script src="_ds/nocturne-b2a8093f-61b4-473f-af7d-c17eedc75b03/_ds_bundle.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+<style>
+  body { margin:0; background:#161826; color:#e9e9ed; font-family:"Inter",system-ui,sans-serif; }
+  a { color:#9184d9; text-underline-offset:3px; }
+  a:hover { color:#b5abfc; }
+  *,*::before,*::after { box-sizing:border-box; }
+  code { font-family:ui-monospace,"SF Mono",Menlo,monospace; font-size:.88em; color:#b5abfc; }
+</style>
+</helmet>
+
+<div style="max-width:1080px;margin:0 auto;padding:72px 56px 120px;display:flex;flex-direction:column;gap:56px">
+
+  <header style="display:flex;flex-direction:column;gap:12px;max-width:780px">
+    <div style="font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:#9397ab">BrowserBound · rhberro/browserbound @ master · revisão 2</div>
+    <h1 style="margin:0;font-size:42px;font-weight:500;letter-spacing:-.015em;line-height:1.08">Plano de interface sobre a gameplay existente</h1>
+    <p style="margin:0;color:#b2b6ca;font-size:16px;line-height:1.6;text-wrap:pretty">Revi o repositório depois do seu push. O que estava travado saiu do caminho: o <code>WindManager</code> está implementado e o vento agora muda <strong style="font-weight:600">por rodada</strong>, as armas viraram configuração declarativa e o cliente foi quebrado em adapters. O escopo desta entrega é <strong style="font-weight:600">só interface</strong> — zero mudança de regra de jogo. Tudo que ainda não existe na gameplay foi para uma lista separada, no fim.</p>
+    <div style="height:3px;width:120px;background:#9184d9;border-radius:2px;margin-top:8px"></div>
+  </header>
+
+  <section style="display:flex;flex-direction:column;gap:14px">
+    <h2 style="margin:0;font-size:20px;font-weight:500;letter-spacing:-.01em">O que mudou desde a revisão 1</h2>
+    <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:12px">
+      <div style="display:flex;flex-direction:column;gap:5px;padding:14px 18px;border-radius:10px;background:rgba(66,58,106,.24);border:1px solid #5d5294">
+        <div style="font-size:14px;font-weight:600">Vento funciona e é legível</div>
+        <p style="margin:0;font-size:13px;line-height:1.5;color:#b2b6ca"><code>advance()</code> e <code>generateNewWind()</code> implementados. O vento dura 5–10 <em>rodadas</em> e o servidor emite <code>windChanged</code> na virada — dá para animar a troca em vez de sortear a cada frame.</p>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:5px;padding:14px 18px;border-radius:10px;background:rgba(66,58,106,.24);border:1px solid #5d5294">
+        <div style="font-size:14px;font-weight:600">Armas viraram dados</div>
+        <p style="margin:0;font-size:13px;line-height:1.5;color:#b2b6ca"><code>WeaponConfigAdapter</code> expõe <code>getAllWeapons()</code> com <code>name</code> e <code>description</code>. O seletor da HUD lê essa lista em vez de ter os três rótulos escritos à mão.</p>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:5px;padding:14px 18px;border-radius:10px;background:rgba(66,58,106,.24);border:1px solid #5d5294">
+        <div style="font-size:14px;font-weight:600">Validação com motivo</div>
+        <p style="margin:0;font-size:13px;line-height:1.5;color:#b2b6ca"><code>MessageValidationAdapter</code> rejeita tiro fora do turno, com projétil no ar ou fora dos limites — e devolve <code>reason</code>. A HUD pode desabilitar o FIRE com a explicação certa.</p>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:5px;padding:14px 18px;border-radius:10px;background:rgba(66,58,106,.24);border:1px solid #5d5294">
+        <div style="font-size:14px;font-weight:600">O cliente ganhou costura</div>
+        <p style="margin:0;font-size:13px;line-height:1.5;color:#b2b6ca"><code>RendererAdapter.updateUI()</code> é o único ponto que escreve interface, e o <code>InputAdapter</code> já tem <code>setWeapon()</code> e <code>setAimAngle()</code> públicos. A HUD entra sem tocar no resto.</p>
+      </div>
+    </div>
+  </section>
+
+  <section style="display:flex;flex-direction:column;gap:24px">
+    <div style="display:flex;align-items:baseline;gap:14px">
+      <span style="font-size:13px;font-weight:700;letter-spacing:.08em;padding:4px 11px;border-radius:999px;border:1px solid #9184d9;color:#b5abfc">ESCOPO</span>
+      <h2 style="margin:0;font-size:28px;font-weight:500;letter-spacing:-.015em">Interface sobre o que o jogo já faz</h2>
+    </div>
+    <p style="margin:0;max-width:740px;color:#b2b6ca;font-size:15px;line-height:1.6">Sete entregas, todas dentro do cliente. Cada uma se liga a estado que o servidor já sincroniza hoje. A ordem é a de execução: a 1 é a base, as outras são independentes entre si.</p>
+
+    <div style="display:flex;flex-direction:column;gap:12px">
+
+      <article style="display:grid;grid-template-columns:48px 1fr 210px;gap:20px;align-items:start;padding:18px 22px;border-radius:12px;background:#232532;box-shadow:0 0 0 1px #3f424d">
+        <div style="font-size:22px;font-weight:700;color:#5d5294;line-height:1.1">01</div>
+        <div style="display:flex;flex-direction:column;gap:6px">
+          <h3 style="margin:0;font-size:17px;font-weight:600">Trocar o <code>innerHTML</code> por uma camada HUD</h3>
+          <p style="margin:0;font-size:14px;line-height:1.55;color:#b2b6ca">Hoje <code>updateUI()</code> remonta a interface inteira a cada frame dentro de <code>#ui</code>. Vira um <code>&lt;div id="hud"&gt;</code> sobre o canvas, com nós persistentes atualizados por diff, <code>pointer-events:none</code> no fundo e ativo só nos controles. Toda a fase 1 mora nessa camada, e a assinatura de <code>updateUI(gameState, aimState, selectedWeapon)</code> continua a mesma.</p>
+        </div>
+        <div style="font-size:12px;color:#75798c;line-height:1.5">RendererAdapter.updateUI()<br>client/index.html</div>
+      </article>
+
+      <article style="display:grid;grid-template-columns:48px 1fr 210px;gap:20px;align-items:start;padding:18px 22px;border-radius:12px;background:#232532;box-shadow:0 0 0 1px #3f424d">
+        <div style="font-size:22px;font-weight:700;color:#5d5294;line-height:1.1">02</div>
+        <div style="display:flex;flex-direction:column;gap:6px">
+          <h3 style="margin:0;font-size:17px;font-weight:600">Vento e turno na pílula de status</h3>
+          <p style="margin:0;font-size:14px;line-height:1.55;color:#b2b6ca">Magnitude é <code>windSpeed / 100</code> (faixa 0,1–0,5) e a direção vem em radianos. A seta gira com o ângulo real em vez do emoji em oito passos que existe hoje. Como o vento só muda na virada de rodada, o evento <code>windChanged</code> ganha uma animação curta — é a informação mais estratégica da tela.</p>
+        </div>
+        <div style="font-size:12px;color:#75798c;line-height:1.5">GameRoom · windChanged<br>WindManager</div>
+      </article>
+
+      <article style="display:grid;grid-template-columns:48px 1fr 210px;gap:20px;align-items:start;padding:18px 22px;border-radius:12px;background:#232532;box-shadow:0 0 0 1px #3f424d">
+        <div style="font-size:22px;font-weight:700;color:#5d5294;line-height:1.1">03</div>
+        <div style="display:flex;flex-direction:column;gap:6px">
+          <h3 style="margin:0;font-size:17px;font-weight:600">Ângulo e força no deck inferior</h3>
+          <p style="margin:0;font-size:14px;line-height:1.55;color:#b2b6ca">Ângulo de 0 a 90°, passo de 1,5° por frame; força de 0 a 100 a 50 pontos por segundo — dois segundos cheios. Os botões − / + chamam <code>setAimAngle()</code> e o FIRE compartilha o mesmo <code>isCharging</code> do Espaço, então teclado e mouse nunca divergem. O deck mostra o valor que já é enviado ao servidor, não uma cópia.</p>
+        </div>
+        <div style="font-size:12px;color:#75798c;line-height:1.5">InputAdapter.setAimAngle()<br>InputAdapter.update()</div>
+      </article>
+
+      <article style="display:grid;grid-template-columns:48px 1fr 210px;gap:20px;align-items:start;padding:18px 22px;border-radius:12px;background:#232532;box-shadow:0 0 0 1px #3f424d">
+        <div style="font-size:22px;font-weight:700;color:#5d5294;line-height:1.1">04</div>
+        <div style="display:flex;flex-direction:column;gap:6px">
+          <h3 style="margin:0;font-size:17px;font-weight:600">Seletor de arma vindo da configuração</h3>
+          <p style="margin:0;font-size:14px;line-height:1.55;color:#b2b6ca">Três opções lidas de <code>getAllWeapons()</code>: Normal, Burst (3 tiros em sequência, 5 frames de intervalo) e Shotgun (3 simultâneos, ±1°). O <code>description</code> de cada uma vira o subtítulo do botão. Clique chama <code>setWeapon()</code>; os atalhos 1/2/3 continuam valendo e refletem na seleção. Sem contador de munição — não existe no jogo.</p>
+        </div>
+        <div style="font-size:12px;color:#75798c;line-height:1.5">WeaponConfigAdapter<br>InputAdapter.setWeapon()</div>
+      </article>
+
+      <article style="display:grid;grid-template-columns:48px 1fr 210px;gap:20px;align-items:start;padding:18px 22px;border-radius:12px;background:#232532;box-shadow:0 0 0 1px #3f424d">
+        <div style="font-size:22px;font-weight:700;color:#5d5294;line-height:1.1">05</div>
+        <div style="display:flex;flex-direction:column;gap:6px">
+          <h3 style="margin:0;font-size:17px;font-weight:600">Placar de dois jogadores</h3>
+          <p style="margin:0;font-size:14px;line-height:1.55;color:#b2b6ca">A sala é <code>maxClients = 2</code>: no lugar da fila de próximos, duas linhas — você e o oponente — com vida de 100 caindo de 20 em 20 e um marcador de quem está na vez. Mesmo tratamento visual da fila que desenhamos, só que com duas linhas em vez de seis; quando a sala crescer, a lista cresce junto sem redesenho.</p>
+        </div>
+        <div style="font-size:12px;color:#75798c;line-height:1.5">Player.health · currentPlayerId</div>
+      </article>
+
+      <article style="display:grid;grid-template-columns:48px 1fr 210px;gap:20px;align-items:start;padding:18px 22px;border-radius:12px;background:#232532;box-shadow:0 0 0 1px #3f424d">
+        <div style="font-size:22px;font-weight:700;color:#5d5294;line-height:1.1">06</div>
+        <div style="display:flex;flex-direction:column;gap:6px">
+          <h3 style="margin:0;font-size:17px;font-weight:600">Feedback de impacto e o mascote</h3>
+          <p style="margin:0;font-size:14px;line-height:1.55;color:#b2b6ca">As três colisões já chegam separadas: <code>player</code> (‑20 de vida), <code>terrain</code> (cratera de raio 50) e <code>miss</code>. Cada uma tem sua reação — dano piscando na linha do alvo, cratera confirmada, e a frase do mascote. A explosão dura 500 ms; a HUD acompanha essa janela para não brigar com o canvas.</p>
+        </div>
+        <div style="font-size:12px;color:#75798c;line-height:1.5">gameState · collision<br>DEFAULT_CRATER_RADIUS</div>
+      </article>
+
+      <article style="display:grid;grid-template-columns:48px 1fr 210px;gap:20px;align-items:start;padding:18px 22px;border-radius:12px;background:#232532;box-shadow:0 0 0 1px #3f424d">
+        <div style="font-size:22px;font-weight:700;color:#5d5294;line-height:1.1">07</div>
+        <div style="display:flex;flex-direction:column;gap:6px">
+          <h3 style="margin:0;font-size:17px;font-weight:600">Estados bloqueados e de sessão</h3>
+          <p style="margin:0;font-size:14px;line-height:1.55;color:#b2b6ca">O validador já diz por que um tiro foi recusado: fora do turno, projétil ainda no ar, força ou ângulo inválidos. Em vez de um <code>console.warn</code>, o FIRE fica desabilitado com o motivo visível. Somam-se as quatro telas de sessão: conectando, aguardando oponente, não é seu turno e oponente inativo (o servidor derruba após 30 s).</p>
+        </div>
+        <div style="font-size:12px;color:#75798c;line-height:1.5">MessageValidationAdapter<br>GameRoom · 30 s timeout</div>
+      </article>
+
+    </div>
+  </section>
+
+  <section style="display:flex;flex-direction:column;gap:16px;padding:20px 24px;border-radius:14px;background:rgba(66,58,106,.28);border:1px solid #5d5294">
+    <div style="font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:#b5abfc">Dois defeitos que a HUD encontra pelo caminho</div>
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <p style="margin:0;font-size:14px;line-height:1.6;text-wrap:pretty">Os <code>room.onMessage(...)</code> foram parar dentro de <code>updateTurnState()</code>, que roda a cada <code>onChange</code> do estado. Cada mudança registra outro conjunto de handlers, então <code>collision</code> e <code>projectileUpdate</code> disparam N vezes. Numa HUD com animação isso vira dano piscando repetido. Registrar uma vez só, no <code>connect()</code>.</p>
+      <p style="margin:0;font-size:14px;line-height:1.6;text-wrap:pretty">Em <code>updateAngleIndicator()</code>, os dois lados do ternário usam <code>gameState.currentPlayerAimAngle</code> — a seta do próprio jogador segue o eco do servidor em vez do ângulo local, com atraso de ida e volta. Deve usar o <code>aimState</code> do <code>InputAdapter</code> quando for o meu turno.</p>
+    </div>
+  </section>
+
+  <section style="display:flex;flex-direction:column;gap:20px">
+    <div style="display:flex;align-items:baseline;gap:14px">
+      <span style="font-size:13px;font-weight:700;letter-spacing:.08em;padding:4px 11px;border-radius:999px;border:1px solid #3f424d;color:#9397ab">FORA DO ESCOPO</span>
+      <h2 style="margin:0;font-size:24px;font-weight:500;letter-spacing:-.015em">Depende de gameplay que ainda não existe</h2>
+    </div>
+    <p style="margin:0;max-width:740px;color:#b2b6ca;font-size:15px;line-height:1.6">Nada aqui entra agora. Ficam registrados como escopo à parte, para quando a regra existir no servidor — aí a interface é a parte fácil.</p>
+    <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px">
+      <div style="display:flex;flex-direction:column;gap:4px;padding:14px 18px;border-radius:10px;background:#1c1f2e;border:1px solid #3f424d">
+        <div style="font-size:14px;font-weight:600;color:#b2b6ca">Temporizador por turno</div>
+        <p style="margin:0;font-size:13px;line-height:1.5;color:#75798c">Não há relógio: a vez só troca quando todos os projéteis somem. Precisa de <code>turnEndsAt</code> no schema e passe automático.</p>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:4px;padding:14px 18px;border-radius:10px;background:#1c1f2e;border:1px solid #3f424d">
+        <div style="font-size:14px;font-weight:600;color:#b2b6ca">Próximos a jogar</div>
+        <p style="margin:0;font-size:13px;line-height:1.5;color:#75798c">A ordem vem da inserção no <code>MapSchema</code> e muda quando alguém sai. Precisa de um <code>turnOrder</code> estável.</p>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:4px;padding:14px 18px;border-radius:10px;background:#1c1f2e;border:1px solid #3f424d">
+        <div style="font-size:14px;font-weight:600;color:#b2b6ca">Partidas de 2 a 8</div>
+        <p style="margin:0;font-size:13px;line-height:1.5;color:#75798c"><code>maxClients = 2</code> e spawn fixo em x=500 / x=1500. Exige distribuir posições e definir times.</p>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:4px;padding:14px 18px;border-radius:10px;background:#1c1f2e;border:1px solid #3f424d">
+        <div style="font-size:14px;font-weight:600;color:#b2b6ca">Munição limitada</div>
+        <p style="margin:0;font-size:13px;line-height:1.5;color:#75798c">Burst e Shotgun são infinitos. Contador por arma no <code>Player</code>, validado no <code>fire</code>.</p>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:4px;padding:14px 18px;border-radius:10px;background:#1c1f2e;border:1px solid #3f424d">
+        <div style="font-size:14px;font-weight:600;color:#b2b6ca">Eliminação e fim de partida</div>
+        <p style="margin:0;font-size:13px;line-height:1.5;color:#75798c">Vida zero não faz nada — o comentário <code>// Player defeated</code> está vazio. Falta condição de vitória e tela de resultado.</p>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:4px;padding:14px 18px;border-radius:10px;background:#1c1f2e;border:1px solid #3f424d">
+        <div style="font-size:14px;font-weight:600;color:#b2b6ca">Nome e identidade</div>
+        <p style="margin:0;font-size:13px;line-height:1.5;color:#75798c">Só existe <code>sessionId</code>. Placar e mensagens de acerto ficam com identificadores crus até haver <code>name</code>.</p>
+      </div>
+    </div>
+  </section>
+
+  <section style="display:flex;flex-direction:column;gap:14px;max-width:760px">
+    <h2 style="margin:0;font-size:24px;font-weight:500;letter-spacing:-.015em">O que isso muda no desenho da HUD</h2>
+    <p style="margin:0;color:#b2b6ca;font-size:15px;line-height:1.6;text-wrap:pretty">A <a href="Match HUD.dc.html">2a Turn Queue</a> foi desenhada com dois elementos que agora estão fora do escopo: o anel de temporizador e a fila de cinco próximos. A versão que vai para o código troca o anel por um indicador de turno e a fila por duas linhas de placar — o resto do deck (ângulo, força, seletor de tiro, mascote, pílula de vento) fica igual. Digo o próximo passo e desenho essa variante quando você confirmar.</p>
+  </section>
+
+</div>
+</x-dc>
+</body>
+</html>

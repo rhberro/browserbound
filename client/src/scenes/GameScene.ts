@@ -46,7 +46,8 @@ export class GameScene {
     this.cameraAdapter.update(this.gameState);
 
     // Update player sprites and health bars
-    this.rendererAdapter.updatePlayers(this.gameState);
+    const aimState = this.inputAdapter.getAimState();
+    this.rendererAdapter.updatePlayers(this.gameState, aimState);
 
     // Update projectile graphics
     this.rendererAdapter.updateProjectiles(this.gameState);
@@ -60,7 +61,6 @@ export class GameScene {
       }
 
       // Send aim angle to server
-      const aimState = this.inputAdapter.getAimState();
       this.gameState.sendAimAngle(aimState.angle);
 
       // Check if player fired

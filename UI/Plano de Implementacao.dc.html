@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="_ds/nocturne-b2a8093f-61b4-473f-af7d-c17eedc75b03/styles.css">
+<script src="_ds/nocturne-b2a8093f-61b4-473f-af7d-c17eedc75b03/_ds_bundle.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+<style>
+  body { margin:0; background:#161826; color:#e9e9ed; font-family:"Inter",system-ui,sans-serif; }
+  a { color:#9184d9; text-underline-offset:3px; }
+  a:hover { color:#b5abfc; }
+  *,*::before,*::after { box-sizing:border-box; }
+  code { font-family:ui-monospace,"SF Mono",Menlo,monospace; font-size:.88em; color:#b5abfc; }
+</style>
+</helmet>
+
+<div style="max-width:1080px;margin:0 auto;padding:72px 56px 120px;display:flex;flex-direction:column;gap:56px">
+
+  <header style="display:flex;flex-direction:column;gap:12px;max-width:760px">
+    <div style="font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:#9397ab">BrowserBound · rhberro/browserbound @ master</div>
+    <h1 style="margin:0;font-size:42px;font-weight:500;letter-spacing:-.015em;line-height:1.08">Plano de implementação da interface</h1>
+    <p style="margin:0;color:#b2b6ca;font-size:16px;line-height:1.6;text-wrap:pretty">Duas fases. Primeiro vestimos o que o jogo <strong style="font-weight:600">já faz</strong> — hoje a UI inteira é um <code>ui.innerHTML</code> dentro de <code>GameScene.render()</code>. Depois abrimos frente de servidor para o que ainda <strong style="font-weight:600">não existe</strong>: temporizador de turno, fila de próximos, munição especial e partidas de 2 a 8.</p>
+    <div style="height:3px;width:120px;background:#9184d9;border-radius:2px;margin-top:8px"></div>
+  </header>
+
+  <section style="display:flex;flex-direction:column;gap:16px;padding:20px 24px;border-radius:14px;background:rgba(66,58,106,.28);border:1px solid #5d5294">
+    <div style="font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:#b5abfc">Bloqueio antes de tudo</div>
+    <p style="margin:0;font-size:15px;line-height:1.6;color:#e9e9ed;text-wrap:pretty"><code>WindManager.advance()</code> e <code>generateNewWind()</code> ainda são <code>throw new Error('Not implemented')</code>, e <code>updatePhysics()</code> chama <code>advance()</code> a cada 16 ms. Enquanto isso não for implementado, nenhum valor de vento chega ao cliente e a HUD não tem o que exibir. É o item zero do plano — meia hora de trabalho, destrava a fase 1 inteira.</p>
+  </section>
+
+  <section style="display:flex;flex-direction:column;gap:24px">
+    <div style="display:flex;align-items:baseline;gap:14px">
+      <span style="font-size:13px;font-weight:700;letter-spacing:.08em;padding:4px 11px;border-radius:999px;border:1px solid #9184d9;color:#b5abfc">FASE 1</span>
+      <h2 style="margin:0;font-size:28px;font-weight:500;letter-spacing:-.015em">Interface para o que já existe</h2>
+    </div>
+    <p style="margin:0;max-width:720px;color:#b2b6ca;font-size:15px;line-height:1.6">Nada de mudança de servidor. Substituímos o bloco <code>#ui</code> por uma camada HTML sobre o canvas PixiJS, lendo os mesmos dados que o <code>GameState</code> já expõe. Entrega em uma leva: a HUD <a href="Match HUD.dc.html">2a Turn Queue</a> ligada ao estado real.</p>
+
+    <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:14px">
+
+      <article style="display:flex;flex-direction:column;gap:8px;padding:18px 20px;border-radius:12px;background:#232532;box-shadow:0 0 0 1px #3f424d">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;gap:12px">
+          <h3 style="margin:0;font-size:17px;font-weight:600">1.1 Camada HUD sobre o canvas</h3>
+          <span style="font-size:10px;letter-spacing:.12em;color:#75798c">BASE</span>
+        </div>
+        <p style="margin:0;font-size:14px;line-height:1.55;color:#b2b6ca">Um <code>&lt;div id="hud"&gt;</code> posicionado sobre <code>#game-container</code>, com <code>pointer-events:none</code> no fundo e ativo só nos controles. Substitui o <code>ui.innerHTML</code> gerado a cada frame por nós persistentes atualizados por diff.</p>
+        <div style="font-size:12px;color:#75798c;padding-top:4px;border-top:1px solid #3f424d;margin-top:4px">client/index.html · GameScene.render()</div>
+      </article>
+
+      <article style="display:flex;flex-direction:column;gap:8px;padding:18px 20px;border-radius:12px;background:#232532;box-shadow:0 0 0 1px #3f424d">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;gap:12px">
+          <h3 style="margin:0;font-size:17px;font-weight:600">1.2 Pílula de status: vento e turno</h3>
+          <span style="font-size:10px;letter-spacing:.12em;color:#75798c">EXISTE</span>
+        </div>
+        <p style="margin:0;font-size:14px;line-height:1.55;color:#b2b6ca">Já temos <code>turnState.windSpeed</code> e <code>windDirection</code> (radianos) e <code>isMyTurn()</code>. A seta gira com a direção; o número mostra a magnitude. Sem timer ainda — o espaço do contador fica reservado para a fase 2.</p>
+        <div style="font-size:12px;color:#75798c;padding-top:4px;border-top:1px solid #3f424d;margin-top:4px">gameState.ts · GameRoom.updatePhysics()</div>
+      </article>
+
+      <article style="display:flex;flex-direction:column;gap:8px;padding:18px 20px;border-radius:12px;background:#232532;box-shadow:0 0 0 1px #3f424d">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;gap:12px">
+          <h3 style="margin:0;font-size:17px;font-weight:600">1.3 Ângulo</h3>
+          <span style="font-size:10px;letter-spacing:.12em;color:#75798c">EXISTE</span>
+        </div>
+        <p style="margin:0;font-size:14px;line-height:1.55;color:#b2b6ca">Faixa 0–90°, passo de 1,5° por frame com ↑/↓, já sincronizado via mensagem <code>aimAngle</code>. Os botões − / + do deck disparam o mesmo caminho do teclado, e o valor espelha <code>facing</code> quando o jogador olha para a esquerda.</p>
+        <div style="font-size:12px;color:#75798c;padding-top:4px;border-top:1px solid #3f424d;margin-top:4px">GameScene.update() · aimAngle</div>
+      </article>
+
+      <article style="display:flex;flex-direction:column;gap:8px;padding:18px 20px;border-radius:12px;background:#232532;box-shadow:0 0 0 1px #3f424d">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;gap:12px">
+          <h3 style="margin:0;font-size:17px;font-weight:600">1.4 Barra de força</h3>
+          <span style="font-size:10px;letter-spacing:.12em;color:#75798c">EXISTE</span>
+        </div>
+        <p style="margin:0;font-size:14px;line-height:1.55;color:#b2b6ca">Carrega a 50 pontos por segundo enquanto o Espaço está pressionado — dois segundos até 100%. A barra segmentada usa esse mesmo ritmo, e o botão FIRE é só um segundo gatilho para <code>isCharging</code>: teclado e mouse compartilham o estado.</p>
+        <div style="font-size:12px;color:#75798c;padding-top:4px;border-top:1px solid #3f424d;margin-top:4px">GameScene.update() · aimPower</div>
+      </article>
+
+      <article style="display:flex;flex-direction:column;gap:8px;padding:18px 20px;border-radius:12px;background:#232532;box-shadow:0 0 0 1px #3f424d">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;gap:12px">
+          <h3 style="margin:0;font-size:17px;font-weight:600">1.5 Seletor de tiro</h3>
+          <span style="font-size:10px;letter-spacing:.12em;color:#75798c">EXISTE</span>
+        </div>
+        <p style="margin:0;font-size:14px;line-height:1.55;color:#b2b6ca">O servidor já aceita <code>weaponType</code> 1, 2 e 3 — Normal (um projétil), Rajada (três em sequência, 5 frames de intervalo) e Shotgun (três simultâneos, ±1°). Renomear os rótulos da HUD para esses três e manter os atalhos 1/2/3.</p>
+        <div style="font-size:12px;color:#75798c;padding-top:4px;border-top:1px solid #3f424d;margin-top:4px">GameRoom.onMessage('fire')</div>
+      </article>
+
+      <article style="display:flex;flex-direction:column;gap:8px;padding:18px 20px;border-radius:12px;background:#232532;box-shadow:0 0 0 1px #3f424d">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;gap:12px">
+          <h3 style="margin:0;font-size:17px;font-weight:600">1.6 Vida e lista de jogadores</h3>
+          <span style="font-size:10px;letter-spacing:.12em;color:#75798c">PARCIAL</span>
+        </div>
+        <p style="margin:0;font-size:14px;line-height:1.55;color:#b2b6ca">Cada <code>Player</code> tem <code>health</code> começando em 100 e perdendo 20 por acerto. A lista lateral mostra os jogadores presentes hoje (máximo 2) com barra e valor; a ordenação por turno entra na fase 2.</p>
+        <div style="font-size:12px;color:#75798c;padding-top:4px;border-top:1px solid #3f424d;margin-top:4px">GameRoom · Player.health</div>
+      </article>
+
+      <article style="display:flex;flex-direction:column;gap:8px;padding:18px 20px;border-radius:12px;background:#232532;box-shadow:0 0 0 1px #3f424d">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;gap:12px">
+          <h3 style="margin:0;font-size:17px;font-weight:600">1.7 Feedback de impacto</h3>
+          <span style="font-size:10px;letter-spacing:.12em;color:#75798c">EXISTE</span>
+        </div>
+        <p style="margin:0;font-size:14px;line-height:1.55;color:#b2b6ca">As mensagens <code>collision</code> já distinguem <code>player</code>, <code>terrain</code> e <code>miss</code>. Cada uma vira uma reação: dano piscando na barra, cratera confirmada, e o mascote com a expressão correspondente — é aqui que mora o humor, sem custo de servidor.</p>
+        <div style="font-size:12px;color:#75798c;padding-top:4px;border-top:1px solid #3f424d;margin-top:4px">gameState.onMessage('collision')</div>
+      </article>
+
+      <article style="display:flex;flex-direction:column;gap:8px;padding:18px 20px;border-radius:12px;background:#232532;box-shadow:0 0 0 1px #3f424d">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;gap:12px">
+          <h3 style="margin:0;font-size:17px;font-weight:600">1.8 Estados de sessão</h3>
+          <span style="font-size:10px;letter-spacing:.12em;color:#75798c">EXISTE</span>
+        </div>
+        <p style="margin:0;font-size:14px;line-height:1.55;color:#b2b6ca">Conectando, aguardando oponente, oponente desconectado (o servidor derruba após 30 s sem atividade) e "não é seu turno" — quatro telas simples que hoje aparecem só como <code>console.log</code> ou texto vermelho de erro.</p>
+        <div style="font-size:12px;color:#75798c;padding-top:4px;border-top:1px solid #3f424d;margin-top:4px">index.ts · GameRoom.onJoin/onLeave</div>
+      </article>
+
+    </div>
+  </section>
+
+  <section style="display:flex;flex-direction:column;gap:24px">
+    <div style="display:flex;align-items:baseline;gap:14px">
+      <span style="font-size:13px;font-weight:700;letter-spacing:.08em;padding:4px 11px;border-radius:999px;border:1px solid #9184d9;color:#b5abfc">FASE 2</span>
+      <h2 style="margin:0;font-size:28px;font-weight:500;letter-spacing:-.015em">O que ainda não existe</h2>
+    </div>
+    <p style="margin:0;max-width:720px;color:#b2b6ca;font-size:15px;line-height:1.6">Cada item aqui precisa de campo novo no <code>GameState</code> do Colyseus antes de virar pixel. Ordenados por dependência: os três primeiros destravam o resto.</p>
+
+    <div style="display:flex;flex-direction:column;gap:12px">
+
+      <article style="display:grid;grid-template-columns:48px 1fr 200px;gap:20px;align-items:start;padding:18px 22px;border-radius:12px;background:#232532;box-shadow:0 0 0 1px #3f424d">
+        <div style="font-size:22px;font-weight:700;color:#5d5294;line-height:1.1">01</div>
+        <div style="display:flex;flex-direction:column;gap:6px">
+          <h3 style="margin:0;font-size:17px;font-weight:600">Ordem de turno explícita</h3>
+          <p style="margin:0;font-size:14px;line-height:1.55;color:#b2b6ca">Hoje a vez passa por <code>playerIds[(currentIndex + 1) % length]</code> lido do <code>MapSchema</code> — a ordem é a de inserção e muda quando alguém sai. Precisamos de um <code>turnOrder: string[]</code> no schema, estável, com índice atual. É o pré-requisito da fila de próximos.</p>
+        </div>
+        <div style="font-size:12px;color:#75798c;line-height:1.5">GameRoom.updatePhysics()<br>+ campo no GameState</div>
+      </article>
+
+      <article style="display:grid;grid-template-columns:48px 1fr 200px;gap:20px;align-items:start;padding:18px 22px;border-radius:12px;background:#232532;box-shadow:0 0 0 1px #3f424d">
+        <div style="font-size:22px;font-weight:700;color:#5d5294;line-height:1.1">02</div>
+        <div style="display:flex;flex-direction:column;gap:6px">
+          <h3 style="margin:0;font-size:17px;font-weight:600">Temporizador por turno</h3>
+          <p style="margin:0;font-size:14px;line-height:1.55;color:#b2b6ca">Não existe nenhum relógio: o turno só troca quando todos os projéteis somem. Adicionar <code>turnEndsAt</code> (timestamp do servidor) e <code>turnDuration</code> ao schema, passar a vez automaticamente no estouro e contar do lado do cliente entre os ticks para o anel não engasgar.</p>
+        </div>
+        <div style="font-size:12px;color:#75798c;line-height:1.5">GameRoom · novo campo<br>+ auto-pass no timeout</div>
+      </article>
+
+      <article style="display:grid;grid-template-columns:48px 1fr 200px;gap:20px;align-items:start;padding:18px 22px;border-radius:12px;background:#232532;box-shadow:0 0 0 1px #3f424d">
+        <div style="font-size:22px;font-weight:700;color:#5d5294;line-height:1.1">03</div>
+        <div style="display:flex;flex-direction:column;gap:6px">
+          <h3 style="margin:0;font-size:17px;font-weight:600">Partidas de 2 a 8 jogadores</h3>
+          <p style="margin:0;font-size:14px;line-height:1.55;color:#b2b6ca"><code>maxClients = 2</code> e o spawn é fixo em x=500 / x=1500. Subir o limite exige distribuir spawns ao longo da plataforma (400–1600) e definir times. A fila lateral da HUD já foi desenhada para 6 linhas e escala até 8.</p>
+        </div>
+        <div style="font-size:12px;color:#75798c;line-height:1.5">GameRoom.maxClients<br>GameRoom.onJoin()</div>
+      </article>
+
+      <article style="display:grid;grid-template-columns:48px 1fr 200px;gap:20px;align-items:start;padding:18px 22px;border-radius:12px;background:#232532;box-shadow:0 0 0 1px #3f424d">
+        <div style="font-size:22px;font-weight:700;color:#5d5294;line-height:1.1">04</div>
+        <div style="display:flex;flex-direction:column;gap:6px">
+          <h3 style="margin:0;font-size:17px;font-weight:600">Próximos a jogar</h3>
+          <p style="margin:0;font-size:14px;line-height:1.55;color:#b2b6ca">Depende de 01 e 03. Com a ordem no schema, a lista lateral mostra os cinco seguintes com vida, time e posição — e a linha do topo vira a do jogador da vez. Sem isso a UI não tem como saber quem vem depois.</p>
+        </div>
+        <div style="font-size:12px;color:#75798c;line-height:1.5">deriva de turnOrder</div>
+      </article>
+
+      <article style="display:grid;grid-template-columns:48px 1fr 200px;gap:20px;align-items:start;padding:18px 22px;border-radius:12px;background:#232532;box-shadow:0 0 0 1px #3f424d">
+        <div style="font-size:22px;font-weight:700;color:#5d5294;line-height:1.1">05</div>
+        <div style="display:flex;flex-direction:column;gap:6px">
+          <h3 style="margin:0;font-size:17px;font-weight:600">Vento por rodada, não por frame</h3>
+          <p style="margin:0;font-size:14px;line-height:1.55;color:#b2b6ca">O <code>WindManager</code> troca o vento a cada 5–10 frames, ou seja, oito vezes por segundo — impossível de ler e de planejar. O documento de domínio já diz "muda a cada rodada": congelar o vento no início do turno e só sortear novo na virada.</p>
+        </div>
+        <div style="font-size:12px;color:#75798c;line-height:1.5">WindManager · config<br>+ snapshot no turno</div>
+      </article>
+
+      <article style="display:grid;grid-template-columns:48px 1fr 200px;gap:20px;align-items:start;padding:18px 22px;border-radius:12px;background:#232532;box-shadow:0 0 0 1px #3f424d">
+        <div style="font-size:22px;font-weight:700;color:#5d5294;line-height:1.1">06</div>
+        <div style="display:flex;flex-direction:column;gap:6px">
+          <h3 style="margin:0;font-size:17px;font-weight:600">Nome e identidade do jogador</h3>
+          <p style="margin:0;font-size:14px;line-height:1.55;color:#b2b6ca">Só existe <code>sessionId</code>. A fila, o placar e as mensagens de acerto precisam de <code>name</code> e de uma cor/avatar por jogador — enviados no <code>joinOrCreate</code> e guardados no <code>Player</code>.</p>
+        </div>
+        <div style="font-size:12px;color:#75798c;line-height:1.5">Player schema · onJoin</div>
+      </article>
+
+      <article style="display:grid;grid-template-columns:48px 1fr 200px;gap:20px;align-items:start;padding:18px 22px;border-radius:12px;background:#232532;box-shadow:0 0 0 1px #3f424d">
+        <div style="font-size:22px;font-weight:700;color:#5d5294;line-height:1.1">07</div>
+        <div style="display:flex;flex-direction:column;gap:6px">
+          <h3 style="margin:0;font-size:17px;font-weight:600">Munição do tiro especial</h3>
+          <p style="margin:0;font-size:14px;line-height:1.55;color:#b2b6ca">Rajada e Shotgun hoje são infinitos. Para o seletor mostrar "2 restantes" e desabilitar quando zerar, o <code>Player</code> precisa de um contador por arma, validado no handler de <code>fire</code>.</p>
+        </div>
+        <div style="font-size:12px;color:#75798c;line-height:1.5">Player schema · onMessage('fire')</div>
+      </article>
+
+      <article style="display:grid;grid-template-columns:48px 1fr 200px;gap:20px;align-items:start;padding:18px 22px;border-radius:12px;background:#232532;box-shadow:0 0 0 1px #3f424d">
+        <div style="font-size:22px;font-weight:700;color:#5d5294;line-height:1.1">08</div>
+        <div style="display:flex;flex-direction:column;gap:6px">
+          <h3 style="margin:0;font-size:17px;font-weight:600">Eliminação e fim de partida</h3>
+          <p style="margin:0;font-size:14px;line-height:1.55;color:#b2b6ca">Quando a vida chega a zero o servidor só imprime <code>Player defeated!</code> — o jogador continua na partida. Falta estado de eliminado (linha riscada na fila), condição de vitória e uma tela de resultado. Cair do mapa já remove o jogador, mas sem aviso nenhum.</p>
+        </div>
+        <div style="font-size:12px;color:#75798c;line-height:1.5">GameRoom · health &lt;= 0</div>
+      </article>
+
+    </div>
+  </section>
+
+  <section style="display:flex;flex-direction:column;gap:16px;max-width:760px">
+    <h2 style="margin:0;font-size:24px;font-weight:500;letter-spacing:-.015em">Sequência sugerida</h2>
+    <ol style="margin:0;padding-left:22px;display:flex;flex-direction:column;gap:10px;color:#b2b6ca;font-size:15px;line-height:1.6">
+      <li>Implementar <code>WindManager.advance()</code> — destrava o vento e a fase 1 inteira.</li>
+      <li>Fase 1 completa como camada HTML sobre o canvas, sem tocar no servidor.</li>
+      <li>Servidor: <code>turnOrder</code> + <code>turnEndsAt</code> + vento por rodada (itens 01, 02, 05) — uma leva só, tudo mexe no mesmo laço.</li>
+      <li>Ligar temporizador e fila de próximos na HUD já pronta (item 04).</li>
+      <li>Escalar para 2–8 jogadores e nomes (03, 06), depois munição e eliminação (07, 08).</li>
+    </ol>
+    <p style="margin:0;color:#75798c;font-size:14px;line-height:1.6">Próximo passo de design: escolher se seguimos para o layout mobile da HUD ou para as telas de estado da fase 1 (conectando, aguardando oponente, fim de partida).</p>
+  </section>
+
+</div>
+</x-dc>
+</body>
+</html>
