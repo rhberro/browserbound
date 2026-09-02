@@ -31,17 +31,14 @@ export class GameState {
 
   async connect(): Promise<void> {
     this.room = await this.client.joinOrCreate('game');
-    console.log('Joined game room:', this.room.sessionId);
 
     if (this.room.state) {
       // Initialize turnState immediately from current state (don't wait for onChange)
-      console.log('🎮 Initializing turnState from current state...');
       this.updateTurnState();
     }
 
     if (this.room.state && this.room.state.players) {
       this.room.state.players.onAdd((player: any, key: string) => {
-        console.log('Player added:', key);
         this.players.set(key, {
           id: key,
           x: player.x,
@@ -63,34 +60,13 @@ export class GameState {
       });
 
       this.room.state.players.onRemove((player: any, key: string) => {
-        console.log('Player removed:', key);
         this.players.delete(key);
       });
     }
 
     if (this.room.state) {
-      console.log('🔌 Setting up state listeners...');
-
-      // Track previous wind values to detect changes
-      let previousWindSpeed = this.room.state.windSpeed;
-      let previousWindDirection = this.room.state.windDirection;
-
-      // Listen for ANY changes on root state
+      // Listen for state changes
       this.room.state.onChange(() => {
-        const currentWindSpeed = this.room!.state.windSpeed;
-        const currentWindDirection = this.room!.state.windDirection;
-
-        // Check if wind values changed
-        if (previousWindSpeed !== currentWindSpeed) {
-          console.log(`💨 WIND SPEED CHANGED: ${previousWindSpeed} → ${currentWindSpeed}`);
-          previousWindSpeed = currentWindSpeed;
-        }
-        if (previousWindDirection !== currentWindDirection) {
-          console.log(`🧭 WIND DIRECTION CHANGED: ${previousWindDirection} → ${currentWindDirection}`);
-          previousWindDirection = currentWindDirection;
-        }
-
-        console.log(`📡 [onChange triggered] Current: Speed=${currentWindSpeed}, Dir=${currentWindDirection}`);
         this.updateTurnState();
       });
     }
@@ -103,10 +79,8 @@ export class GameState {
       windSpeed: this.room.state.windSpeed,
       windDirection: this.room.state.windDirection,
     };
-    console.log('📊 [updateTurnState] Speed:', this.turnState.windSpeed, 'Direction:', this.turnState.windDirection);
 
     this.room.onMessage('projectile', (data) => {
-      console.log('Projectile fired:', data);
       this.projectiles.clear();
       // Usar os IDs que o servidor envia
       if (data.projectileIds) {
@@ -134,7 +108,6 @@ export class GameState {
     });
 
     this.room.onMessage('collision', (data) => {
-      console.log('Collision detected:', data);
       this.collision = {
         type: data.type,
         x: data.x,
@@ -158,14 +131,12 @@ export class GameState {
     });
 
     this.room.onMessage('hit', (data) => {
-      console.log('Player hit:', data.targetId, 'Health:', data.health);
       if (this.onPlayerHit) {
         this.onPlayerHit(data.targetId, data.health);
       }
     });
 
     this.room.onMessage('terrainSync', (data: { ops: TerrainOp[] }) => {
-      console.log('Terrain sync received, ops:', data.ops.length);
       if (this.onTerrainOp) {
         for (const op of data.ops) {
           this.onTerrainOp(op);
@@ -189,9 +160,6 @@ export class GameState {
 
     // Listen for explicit wind change messages
     this.room.onMessage('windChanged', (data) => {
-      console.log(`🌬️ WIND CHANGED MESSAGE RECEIVED!`);
-      console.log(`   Speed: ${this.turnState?.windSpeed} → ${data.windSpeed}`);
-      console.log(`   Direction: ${this.turnState?.windDirection} → ${data.windDirection}`);
       if (this.turnState) {
         this.turnState.windSpeed = data.windSpeed;
         this.turnState.windDirection = data.windDirection;

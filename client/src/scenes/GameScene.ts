@@ -38,16 +38,13 @@ export class GameScene {
   private weaponSelectGraphics: Map<number, PIXI.Graphics> = new Map();
 
   constructor(app: PIXI.Application, gameState: GameState) {
-    console.log('GameScene constructor starting...');
     this.app = app;
     this.gameState = gameState;
     this.container = new PIXI.Container();
     this.app.stage.addChild(this.container);
-    console.log('Container created, MAP_WIDTH:', MAP_WIDTH, 'MAP_HEIGHT:', MAP_HEIGHT);
 
     this.terrainGraphics = new PIXI.Graphics();
     this.container.addChildAt(this.terrainGraphics, 0);
-    console.log('Terrain graphics created');
 
     this.gameState.setOnTerrainOp((op) => this.applyTerrainOp(op));
 
@@ -55,7 +52,6 @@ export class GameScene {
   }
 
   private applyTerrainOp(op: TerrainOp) {
-    console.log('Applying terrain op:', op.type, op);
     this.terrainOps.push(op);
     this.redrawTerrain();
   }
@@ -78,8 +74,6 @@ export class GameScene {
         this.terrainGraphics.stroke({ width: 0 });
       }
     }
-
-    console.log('Terrain redrawn with', this.terrainOps.length, 'operations');
   }
 
   private setupInput() {
@@ -440,7 +434,6 @@ export class GameScene {
       // Calculate wind direction in degrees
       const windDegrees = (this.gameState.turnState.windDirection * 180 / Math.PI) % 360;
       const windArrow = this.getWindArrow(windDegrees);
-      console.log("Rendering wind UI - Speed:", this.gameState.turnState.windSpeed, "Direction:", this.gameState.turnState.windDirection);
 
       ui.innerHTML = `
         <div style="padding: 10px; background: rgba(0,0,0,0.7); border: 2px solid #0f0; border-radius: 5px;">

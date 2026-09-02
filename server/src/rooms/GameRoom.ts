@@ -92,7 +92,6 @@ export class GameRoom extends Room<GameState> {
   }
 
   onCreate() {
-    console.log('GameRoom created');
     this.setState(new GameState());
 
     // Initialize adapters
@@ -114,10 +113,6 @@ export class GameRoom extends Room<GameState> {
     // Set initial wind state
     this.state.windSpeed = wind.magnitude * 100;
     this.state.windDirection = wind.angle;
-    console.log(`🌪️ INITIAL WIND SET:`);
-    console.log(`   Speed: ${this.state.windSpeed.toFixed(1)}`);
-    console.log(`   Direction: ${(this.state.windDirection * 180 / Math.PI).toFixed(1)}°`);
-    console.log(`   Duration: ${this.currentWindDuration} rounds before change`);
 
     // Physics loop - update every 16ms
     this.setSimulationInterval(() => this.updatePhysics(), 16);
@@ -134,23 +129,9 @@ export class GameRoom extends Room<GameState> {
     this.onMessage('fire', (client, data: any) => {
       this.clientLastActivity.set(client.sessionId, Date.now());
       const player = this.state.players.get(client.sessionId);
-
-      // Debug: Log all fire attempts
-      if (!player) {
-        console.log(`❌ Fire rejected: Player not found`);
-        return;
-      }
-      if (client.sessionId !== this.state.currentPlayerId) {
-        console.log(`❌ Fire rejected: Not your turn (current=${this.state.currentPlayerId}, attempted=${client.sessionId})`);
-        return;
-      }
-      if (this.projectiles.length > 0) {
-        console.log(`❌ Fire rejected: Projectiles still in flight (count=${this.projectiles.length})`);
-        return;
-      }
+      if (!player || client.sessionId !== this.state.currentPlayerId || this.projectiles.length > 0) return;
 
       const weaponType = data.weaponType || 1;
-      console.log(`🔫 FIRE SUCCESS: Player ${client.sessionId} fired with angle=${data.angle}, power=${data.power}, weapon=${weaponType}`);
 
       const speed = data.power * POWER_SCALE;
 
@@ -275,7 +256,6 @@ export class GameRoom extends Room<GameState> {
     const now = Date.now();
     for (const [clientId] of this.clientLastActivity) {
       if (now - this.clientLastActivity.get(clientId)! > 30000) { // 30 seconds
-        console.log(`Removing inactive client: ${clientId}`);
         this.clientLastActivity.delete(clientId);
         if (this.state.players.has(clientId)) {
           this.state.players.delete(clientId);
@@ -356,7 +336,6 @@ export class GameRoom extends Room<GameState> {
         if (collision.type === 'player') {
           const hitPlayer = this.state.players.get(collision.playerId!);
           if (hitPlayer) {
-            console.log(`Hit player ${collision.playerId}`);
             hitPlayer.health -= 20;
 
             this.broadcast('collision', {
@@ -369,11 +348,10 @@ export class GameRoom extends Room<GameState> {
             });
 
             if (hitPlayer.health <= 0) {
-              console.log(`Player ${collision.playerId} defeated!`);
+              // Player defeated
             }
           }
         } else if (collision.type === 'terrain') {
-          console.log(`Projectile hit terrain`);
           this.destroyTerrain(collision.x, collision.y);
 
           this.broadcast('collision', {
@@ -403,41 +381,28 @@ export class GameRoom extends Room<GameState> {
       const playerIds = Array.from(this.state.players.keys());
       const currentIndex = playerIds.indexOf(this.state.currentPlayerId);
       const nextIndex = (currentIndex + 1) % playerIds.length;
-      const oldPlayerId = this.state.currentPlayerId;
       this.state.currentPlayerId = playerIds[nextIndex];
-
-      console.log(`🔄 TURN CHANGED: ${oldPlayerId} -> ${playerIds[nextIndex]} | Players: ${playerIds.length}`);
 
       // Detect round completion: when turn returns to first player
       // Solo: nextIndex = 0 every turn. Multiplayer: nextIndex = 0 after last player
       if (nextIndex === 0) {
         this.roundsCompleted++;
-        console.log(`📊 Round count: ${this.roundsCompleted}/${this.currentWindDuration} (Wind duration: ${this.currentWindDuration} rounds)`);
 
         // Check if wind duration expired
         if (this.roundsCompleted >= this.currentWindDuration) {
-          console.log(`⚠️ WIND DURATION EXPIRED! Generating new wind...`);
           this.windManager.generateNewWind();
           const newWind = this.windManager.getCurrentWind();
           this.currentWindDuration = newWind.framesRemaining;
           this.roundsCompleted = 0;
 
-          // UPDATE STATE SO CLIENT RECEIVES NEW WIND VALUES
-          const oldSpeed = this.state.windSpeed;
-          const oldDir = this.state.windDirection;
+          // Update state and broadcast wind change
           this.state.windSpeed = newWind.magnitude * 100;
           this.state.windDirection = newWind.angle;
 
-          // Explicitly broadcast wind change to ensure clients receive it
           this.broadcast('windChanged', {
             windSpeed: this.state.windSpeed,
             windDirection: this.state.windDirection,
           });
-
-          console.log(`🌪️ WIND UPDATED!`);
-          console.log(`   Speed: ${oldSpeed.toFixed(1)} → ${this.state.windSpeed.toFixed(1)}`);
-          console.log(`   Direction: ${(oldDir * 180 / Math.PI).toFixed(1)}° → ${(this.state.windDirection * 180 / Math.PI).toFixed(1)}°`);
-          console.log(`   New wind duration: ${this.currentWindDuration} rounds`);
         }
       }
     }
@@ -479,7 +444,6 @@ export class GameRoom extends Room<GameState> {
 
       // Verificar se o jogador saiu dos limites do mapa (morre)
       if (player.y > MAP_HEIGHT + 50 || player.x < -50 || player.x > MAP_WIDTH + 50 || player.y < -50) {
-        console.log(`Player ${playerId} fell off the map!`);
         deadPlayers.push(playerId);
       }
     }
@@ -502,8 +466,6 @@ export class GameRoom extends Room<GameState> {
   }
 
   onJoin(client: Client) {
-    console.log(`Client ${client.sessionId} joined`);
-
     const player = new Player();
     player.id = client.sessionId;
     player.x = this.state.players.size === 0 ? 500 : 1500; // Separados por todo o mapa
@@ -521,12 +483,9 @@ export class GameRoom extends Room<GameState> {
 
     // Send current terrain state to the client
     client.send('terrainSync', { ops: this.terrainOps });
-
-    console.log(`Current turn: ${this.state.currentPlayerId}, Players: ${Array.from(this.state.players.keys()).join(',')}`);
   }
 
   onLeave(client: Client) {
-    console.log(`Client ${client.sessionId} left`);
     this.clientLastActivity.delete(client.sessionId);
     this.playerInputs.delete(client.sessionId);
     this.state.players.delete(client.sessionId);
