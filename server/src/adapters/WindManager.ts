@@ -24,8 +24,8 @@ export class WindManager {
 
   constructor(config: Partial<WindConfig> = {}) {
     this.config = {
-      durationMin: config.durationMin ?? 20,
-      durationMax: config.durationMax ?? 60,
+      durationMin: config.durationMin ?? 5,
+      durationMax: config.durationMax ?? 10,
       magnitudeMin: config.magnitudeMin ?? 0.1,
       magnitudeMax: config.magnitudeMax ?? 0.5,
     };

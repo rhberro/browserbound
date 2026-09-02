@@ -98,8 +98,8 @@ export class GameRoom extends Room<GameState> {
       windIntegration: 0.1,
     });
     this.windManager = new WindManager({
-      durationMin: 20,
-      durationMax: 60,
+      durationMin: 5,
+      durationMax: 10,
       magnitudeMin: 0.1,
       magnitudeMax: 0.5,
     });

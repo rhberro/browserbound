@@ -19,7 +19,7 @@ A **Projectile** is a physical object fired by a player with an initial velocity
 **Wind** is an environmental force that affects all active projectiles. It has:
 - **Magnitude**: How strong the wind is (force applied each frame)
 - **Direction**: Angle in radians (0 to 2π); wind pushes in this direction
-- **Duration**: How many frames the current wind persists (random: 20–60 frames)
+- **Duration**: How many frames the current wind persists (random: 5–10 frames)
 
 When wind duration expires, a new wind spawns immediately with random magnitude and direction.
 
