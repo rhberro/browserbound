@@ -51,7 +51,7 @@ export class WindManager {
   }
 
   /**
-   * Generate a new random wind.
+   * Generate a new random wind and update internal state.
    */
   generateNewWind(): WindState {
     const magnitude =
@@ -63,11 +63,13 @@ export class WindManager {
         Math.random() * (this.config.durationMax - this.config.durationMin)
       ) + this.config.durationMin;
 
-    return {
+    this.wind = {
       magnitude,
       angle,
       framesRemaining: duration,
     };
+
+    return { ...this.wind };
   }
 
   /**
