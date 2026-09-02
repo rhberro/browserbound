@@ -1,6 +1,9 @@
 import { Room, Client } from 'colyseus';
 import { Schema, type, MapSchema } from '@colyseus/schema';
 import { POWER_SCALE, GRAVITY, TerrainOp, MAP_WIDTH, MAP_HEIGHT, DEFAULT_CRATER_RADIUS, applyOpToBitmap } from '@browserbond/shared';
+import { PhysicsAdapter, Wind } from '@browserbond/shared/src/adapters/PhysicsAdapter';
+import { WindManager } from './adapters/WindManager';
+
 
 class Player extends Schema {
   @type('string') id = '';
@@ -61,6 +64,8 @@ export class GameRoom extends Room<GameState> {
   private projectiles: GameProjectile[] = [];
   private pendingProjectiles: GameProjectile[] = [];
   private currentFrame: number = 0;
+  private physics!: PhysicsAdapter;
+  private windManager!: WindManager;
 
   constructor(options: any) {
     super(options);
@@ -87,6 +92,18 @@ export class GameRoom extends Room<GameState> {
     console.log('GameRoom created');
     this.setState(new GameState());
 
+    // Initialize adapters
+    this.physics = new PhysicsAdapter({
+      gravity: GRAVITY,
+      windIntegration: 0.1,
+    });
+    this.windManager = new WindManager({
+      durationMin: 20,
+      durationMax: 60,
+      magnitudeMin: 0.1,
+      magnitudeMax: 0.5,
+    });
+
     // Physics loop - update every 16ms
     this.setSimulationInterval(() => this.updatePhysics(), 16);
 
@@ -112,11 +129,12 @@ export class GameRoom extends Room<GameState> {
       // Criar projéteis baseado no tipo de arma
       if (weaponType === 1) {
         // Tiro normal - 1 projétil
+        const vel = this.physics.createProjectile(data.angle, data.power);
         const proj = new GameProjectile(
           player.x,
           player.y,
-          Math.cos(data.angle) * speed,
-          -Math.sin(data.angle) * speed,
+          vel.vx,
+          vel.vy,
           client.sessionId,
           this.currentFrame
         );
@@ -250,23 +268,23 @@ export class GameRoom extends Room<GameState> {
       return true; // Mantém na fila
     });
 
-    // Update projectiles (multiple)
+    // Advance wind cycle
+    this.windManager.advance();
+    const wind: Wind = this.windManager.getCurrentWind();
+
+    // Update state with wind info
+    this.state.windSpeed = wind.magnitude * 100;
+    this.state.windDirection = wind.angle;
+
+    // Update projectiles using PhysicsAdapter
+    this.physics.updateAllProjectiles(this.projectiles, wind);
+
+    // Check collisions
     const projectilesToRemove: string[] = [];
 
     for (const proj of this.projectiles) {
-      const prevX = proj.x;
-      const prevY = proj.y;
-
-      proj.vy += GRAVITY;
-
-      // Apply wind
-      const windForceX = Math.cos(this.state.windDirection) * (this.state.windSpeed * 0.05);
-      const windForceY = Math.sin(this.state.windDirection) * (this.state.windSpeed * 0.05);
-      proj.vx += windForceX;
-      proj.vy += windForceY;
-
-      proj.x += proj.vx;
-      proj.y += proj.vy;
+      const prevX = proj.x - proj.vx;
+      const prevY = proj.y - proj.vy;
 
       // Enviar posição do projétil para os clientes
       this.broadcast('projectileUpdate', {
