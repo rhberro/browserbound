@@ -437,12 +437,33 @@ export class GameScene {
         `;
       }
 
+      // Calculate wind direction in degrees
+      const windDegrees = (this.gameState.turnState.windDirection * 180 / Math.PI) % 360;
+      const windArrow = this.getWindArrow(windDegrees);
+
       ui.innerHTML = `
-        <div>Wind: ${this.gameState.turnState.windSpeed.toFixed(1)} px/frame</div>
-        <div>Turn: ${isMyTurn ? 'YOUR TURN' : 'Opponent Turn'}</div>
-        ${aimDisplay}
-        ${weaponDisplay}
+        <div style="padding: 10px; background: rgba(0,0,0,0.7); border: 2px solid #0f0; border-radius: 5px;">
+          <div style="font-size: 14px; color: #0f0; margin-bottom: 5px;">
+            🌪️ Wind: <strong>${(this.gameState.turnState.windSpeed / 100).toFixed(2)}</strong> | Direction: <strong>${windDegrees.toFixed(0)}°</strong> ${windArrow}
+          </div>
+          <div>Turn: ${isMyTurn ? 'YOUR TURN' : 'Opponent Turn'}</div>
+          ${aimDisplay}
+          ${weaponDisplay}
+        </div>
       `;
     }
+  }
+
+  private getWindArrow(degrees: number): string {
+    // Convert degrees to arrow emoji
+    if (degrees >= 337.5 || degrees < 22.5) return '➡️'; // Right
+    if (degrees >= 22.5 && degrees < 67.5) return '↗️'; // Up-right
+    if (degrees >= 67.5 && degrees < 112.5) return '⬆️'; // Up
+    if (degrees >= 112.5 && degrees < 157.5) return '↖️'; // Up-left
+    if (degrees >= 157.5 && degrees < 202.5) return '⬅️'; // Left
+    if (degrees >= 202.5 && degrees < 247.5) return '↙️'; // Down-left
+    if (degrees >= 247.5 && degrees < 292.5) return '⬇️'; // Down
+    if (degrees >= 292.5 && degrees < 337.5) return '↘️'; // Down-right
+    return '➡️';
   }
 }
