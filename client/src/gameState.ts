@@ -64,11 +64,13 @@ export class GameState {
 
     if (this.room.state) {
       this.room.state.onChange(() => {
+        console.log('State changed - windSpeed:', this.room!.state.windSpeed, 'windDirection:', this.room!.state.windDirection);
         this.turnState = {
           currentPlayerId: this.room!.state.currentPlayerId,
           windSpeed: this.room!.state.windSpeed,
           windDirection: this.room!.state.windDirection,
         };
+        console.log('TurnState updated:', this.turnState);
       });
     }
 

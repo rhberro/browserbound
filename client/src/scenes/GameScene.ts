@@ -440,6 +440,7 @@ export class GameScene {
       // Calculate wind direction in degrees
       const windDegrees = (this.gameState.turnState.windDirection * 180 / Math.PI) % 360;
       const windArrow = this.getWindArrow(windDegrees);
+      console.log("Rendering wind UI - Speed:", this.gameState.turnState.windSpeed, "Direction:", this.gameState.turnState.windDirection);
 
       ui.innerHTML = `
         <div style="padding: 10px; background: rgba(0,0,0,0.7); border: 2px solid #0f0; border-radius: 5px;">
