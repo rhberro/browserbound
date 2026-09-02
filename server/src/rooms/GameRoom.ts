@@ -2,6 +2,7 @@ import { Room, Client } from 'colyseus';
 import { Schema, type, MapSchema } from '@colyseus/schema';
 import { POWER_SCALE, GRAVITY, TerrainOp, MAP_WIDTH, MAP_HEIGHT, DEFAULT_CRATER_RADIUS, applyOpToBitmap } from '@browserbond/shared';
 import { PhysicsAdapter, Wind } from '@browserbond/shared/src/adapters/PhysicsAdapter';
+import { MessageValidationAdapter } from '@browserbond/shared/src/adapters/MessageValidationAdapter';
 import { WindManager } from '../adapters/WindManager';
 import { getWeapon, generateProjectileSpecs } from '@browserbond/shared/src/adapters/WeaponConfigAdapter';
 
@@ -67,6 +68,7 @@ export class GameRoom extends Room<GameState> {
   private currentFrame: number = 0;
   private physics!: PhysicsAdapter;
   private windManager!: WindManager;
+  private validator!: MessageValidationAdapter;
   private roundsCompleted: number = 0;
   private currentWindDuration: number = 0;
   private lastPlayerId: string = '';
@@ -100,6 +102,7 @@ export class GameRoom extends Room<GameState> {
       gravity: GRAVITY,
       windIntegration: 0.1,
     });
+    this.validator = new MessageValidationAdapter();
     this.windManager = new WindManager({
       durationMin: 5,
       durationMax: 10,
@@ -119,6 +122,11 @@ export class GameRoom extends Room<GameState> {
     this.setSimulationInterval(() => this.updatePhysics(), 16);
 
     this.onMessage('move', (client, data: { left: boolean; right: boolean; jump: boolean }) => {
+      const validation = this.validator.validateMoveMessage(data, this.buildValidationGameState(), client.sessionId);
+      if (!validation.valid) {
+        console.warn(`[Move] ${validation.reason} from ${client.sessionId}`);
+        return;
+      }
       this.playerInputs.set(client.sessionId, data);
       this.clientLastActivity.set(client.sessionId, Date.now());
     });
@@ -129,8 +137,13 @@ export class GameRoom extends Room<GameState> {
 
     this.onMessage('fire', (client, data: any) => {
       this.clientLastActivity.set(client.sessionId, Date.now());
+      const validation = this.validator.validateFireMessage(data, this.buildValidationGameState(), client.sessionId);
+      if (!validation.valid) {
+        console.warn(`[Fire] ${validation.reason} from ${client.sessionId}`);
+        return;
+      }
       const player = this.state.players.get(client.sessionId);
-      if (!player || client.sessionId !== this.state.currentPlayerId || this.projectiles.length > 0) return;
+      if (!player) return;
 
       const weaponType = data.weaponType || 1;
       const weapon = getWeapon(weaponType);
@@ -404,6 +417,24 @@ export class GameRoom extends Room<GameState> {
     this.terrainOps.push(op);
     applyOpToBitmap(this.terrainBitmap, op, MAP_WIDTH, MAP_HEIGHT);
     this.broadcast('terrainOp', op);
+  }
+
+  private buildValidationGameState(): {
+    currentPlayerId: string;
+    players: Map<string, { health: number }>;
+    projectiles: Map<string, { x: number; y: number; firedBy: string }>;
+  } {
+    const projectilesMap = new Map(
+      this.projectiles.map((proj) => [proj.id, { x: proj.x, y: proj.y, firedBy: proj.firedBy }])
+    );
+    const playersMap = new Map(
+      Array.from(this.state.players.entries()).map(([id, player]) => [id, { health: player.health }])
+    );
+    return {
+      currentPlayerId: this.state.currentPlayerId,
+      players: playersMap,
+      projectiles: projectilesMap,
+    };
   }
 
   onJoin(client: Client) {
