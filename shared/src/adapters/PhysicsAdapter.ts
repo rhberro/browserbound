@@ -39,8 +39,11 @@ export class PhysicsAdapter {
    * @returns Initial velocity {vx, vy}
    */
   createProjectile(angle: number, power: number): { vx: number; vy: number } {
-    // TODO: Implement
-    throw new Error('Not implemented');
+    const speed = power * 0.3;
+    return {
+      vx: speed * Math.cos(angle),
+      vy: -speed * Math.sin(angle),
+    };
   }
 
   /**
@@ -48,7 +51,16 @@ export class PhysicsAdapter {
    * Modifies projectiles in-place.
    */
   updateAllProjectiles(projectiles: Projectile[], wind: Wind): void {
-    // TODO: Implement
-    throw new Error('Not implemented');
+    for (const proj of projectiles) {
+      proj.vy += this.gravity;
+
+      const windVx = wind.magnitude * Math.cos(wind.angle) * this.windIntegration;
+      const windVy = wind.magnitude * Math.sin(wind.angle) * this.windIntegration;
+      proj.vx += windVx;
+      proj.vy += windVy;
+
+      proj.x += proj.vx;
+      proj.y += proj.vy;
+    }
   }
 }

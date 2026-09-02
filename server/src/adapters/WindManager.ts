@@ -44,16 +44,30 @@ export class WindManager {
    * Advance wind by one frame. If duration expires, spawn new wind.
    */
   advance(): void {
-    // TODO: Implement
-    throw new Error('Not implemented');
+    this.wind.framesRemaining -= 1;
+    if (this.wind.framesRemaining <= 0) {
+      this.wind = this.generateNewWind();
+    }
   }
 
   /**
    * Generate a new random wind.
    */
   private generateNewWind(): WindState {
-    // TODO: Implement
-    throw new Error('Not implemented');
+    const magnitude =
+      Math.random() * (this.config.magnitudeMax - this.config.magnitudeMin) +
+      this.config.magnitudeMin;
+    const angle = Math.random() * (2 * Math.PI);
+    const duration =
+      Math.floor(
+        Math.random() * (this.config.durationMax - this.config.durationMin)
+      ) + this.config.durationMin;
+
+    return {
+      magnitude,
+      angle,
+      framesRemaining: duration,
+    };
   }
 
   /**
