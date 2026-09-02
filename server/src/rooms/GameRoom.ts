@@ -395,6 +395,11 @@ export class GameRoom extends Room<GameState> {
           const newWind = this.windManager.getCurrentWind();
           this.currentWindDuration = newWind.framesRemaining;
           this.roundsCompleted = 0;
+
+          // UPDATE STATE SO CLIENT RECEIVES NEW WIND VALUES
+          this.state.windSpeed = newWind.magnitude * 100;
+          this.state.windDirection = newWind.angle;
+
           console.log(`🌪️ Wind changed! New duration: ${this.currentWindDuration} rounds, Magnitude: ${newWind.magnitude.toFixed(2)}, Angle: ${(newWind.angle * 180 / Math.PI).toFixed(1)}°`);
         }
       }
