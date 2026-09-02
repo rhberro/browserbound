@@ -13,6 +13,15 @@ import * as PIXI from 'pixi.js';
 import { MAP_WIDTH, MAP_HEIGHT, TerrainOp } from '@browserbond/shared';
 import type { AimState } from './InputAdapter';
 
+interface DeathExplosion {
+  graphics: PIXI.Graphics;
+  x: number;
+  y: number;
+  start: number;
+  duration: number;
+  shards: { angle: number; speed: number; size: number }[];
+}
+
 export class RendererAdapter {
   private container: PIXI.Container;
   private playerSprites: Map<string, PIXI.Container> = new Map();
@@ -23,6 +32,7 @@ export class RendererAdapter {
   private explosionGraphics: PIXI.Graphics | null = null;
   private terrainOps: TerrainOp[] = [];
   private explosionDuration: number = 500;
+  private deathExplosions: DeathExplosion[] = [];
 
   constructor(app: PIXI.Application, container: PIXI.Container) {
     this.container = container;
@@ -158,7 +168,7 @@ export class RendererAdapter {
       angleInd.clear();
       const facing = player.facing || 1;
       const isMyTurn = playerId === gameState.getRoomSessionId();
-      const angle = isMyTurn && aimState ? aimState.angle : gameState.currentPlayerAimAngle;
+      const angle = isMyTurn && aimState ? aimState.angle : 45;
       const relativeAngle = facing === 1 ? angle : 180 - angle;
       const radians = (relativeAngle * Math.PI) / 180;
 
@@ -300,6 +310,81 @@ export class RendererAdapter {
         }
       }
     }
+  }
+
+  /**
+   * Spawn a death explosion at the position where a player was destroyed.
+   *
+   * Placeholder art: an expanding orange fireball with a white-hot core, a
+   * shockwave ring and a handful of debris shards flying outwards.
+   */
+  spawnDeathExplosion(x: number, y: number): void {
+    const graphics = new PIXI.Graphics();
+    this.container.addChild(graphics);
+
+    const shards = Array.from({ length: 10 }, (_, i) => {
+      const angle = (i / 10) * Math.PI * 2 + Math.random() * 0.4;
+      return { angle, speed: 60 + Math.random() * 70, size: 2 + Math.random() * 3 };
+    });
+
+    this.deathExplosions.push({
+      graphics,
+      x,
+      y,
+      start: Date.now(),
+      duration: 900,
+      shards,
+    });
+  }
+
+  /**
+   * Advance every active death explosion, removing the ones that finished.
+   */
+  updateDeathExplosions(): void {
+    const now = Date.now();
+
+    this.deathExplosions = this.deathExplosions.filter((explosion) => {
+      const progress = (now - explosion.start) / explosion.duration;
+
+      if (progress >= 1) {
+        this.container.removeChild(explosion.graphics);
+        explosion.graphics.destroy();
+        return false;
+      }
+
+      const g = explosion.graphics;
+      g.clear();
+      g.x = explosion.x;
+      g.y = explosion.y;
+
+      // Shockwave ring
+      const ringRadius = 20 + progress * 70;
+      g.circle(0, 0, ringRadius);
+      g.stroke({ width: 3 * (1 - progress), color: 0xffdd88, alpha: 1 - progress });
+
+      // Fireball
+      const fireRadius = 45 * Math.sin(Math.min(1, progress * 1.6) * (Math.PI / 2));
+      g.circle(0, 0, fireRadius);
+      g.fill({ color: 0xff6622, alpha: 0.85 * (1 - progress) });
+
+      // White-hot core (fades out first)
+      if (progress < 0.45) {
+        const coreAlpha = 1 - progress / 0.45;
+        g.circle(0, 0, fireRadius * 0.5);
+        g.fill({ color: 0xffee99, alpha: coreAlpha });
+      }
+
+      // Debris shards
+      for (const shard of explosion.shards) {
+        const distance = shard.speed * progress;
+        const sx = Math.cos(shard.angle) * distance;
+        const sy = Math.sin(shard.angle) * distance + 60 * progress * progress;
+        g.circle(sx, sy, shard.size);
+        g.fill({ color: 0x552211, alpha: 1 - progress });
+      }
+
+      return true;
+    });
   }
 
   /**

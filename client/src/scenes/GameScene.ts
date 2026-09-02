@@ -31,6 +31,11 @@ export class GameScene {
     // Set up terrain operations
     this.gameState.setOnTerrainOp((op) => this.rendererAdapter.applyTerrainOp(op));
 
+    // Blow up players the moment the server reports them dead
+    this.gameState.onPlayerDied = (_playerId, x, y) => {
+      this.rendererAdapter.spawnDeathExplosion(x, y);
+    };
+
     // Set up input after a short delay to ensure DOM is ready
     setTimeout(() => {
       this.inputAdapter.setupInput();
@@ -85,6 +90,9 @@ export class GameScene {
 
     // Render explosion animation
     this.rendererAdapter.renderExplosion(this.gameState.collision);
+
+    // Advance any death explosions
+    this.rendererAdapter.updateDeathExplosions();
 
     // Update UI with current state
     this.rendererAdapter.updateUI(

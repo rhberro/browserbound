@@ -12,6 +12,7 @@ export class GameState {
   public currentPlayerAimAngle: number = 45;
   public onTerrainOp: ((op: TerrainOp) => void) | null = null;
   public onPlayerHit: ((targetId: string, health: number) => void) | null = null;
+  public onPlayerDied: ((playerId: string, x: number, y: number) => void) | null = null;
   private pendingTerrainOps: TerrainOp[] = [];
 
   constructor() {
@@ -121,6 +122,17 @@ export class GameState {
         this.projectiles.delete(data.projectileId);
       } else {
         this.projectiles.clear();
+      }
+    });
+
+    this.room.onMessage('playerDied', (data: { playerId: string; x: number; y: number }) => {
+      // Drop the player locally right away instead of waiting for the schema
+      // removal to arrive — the sprite must disappear on the same frame the
+      // explosion starts.
+      this.players.delete(data.playerId);
+
+      if (this.onPlayerDied) {
+        this.onPlayerDied(data.playerId, data.x, data.y);
       }
     });
 

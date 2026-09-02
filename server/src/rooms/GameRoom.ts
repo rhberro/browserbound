@@ -1,6 +1,6 @@
 import { Room, Client } from 'colyseus';
 import { Schema, type, MapSchema } from '@colyseus/schema';
-import { POWER_SCALE, GRAVITY, TerrainOp, MAP_WIDTH, MAP_HEIGHT, DEFAULT_CRATER_RADIUS, applyOpToBitmap } from '@browserbond/shared';
+import { POWER_SCALE, GRAVITY, WIND_INTEGRATION, TerrainOp, MAP_WIDTH, MAP_HEIGHT, DEFAULT_CRATER_RADIUS, applyOpToBitmap } from '@browserbond/shared';
 import { PhysicsAdapter, Wind } from '@browserbond/shared/src/adapters/PhysicsAdapter';
 import { MessageValidationAdapter } from '@browserbond/shared/src/adapters/MessageValidationAdapter';
 import { WindManager } from '../adapters/WindManager';
@@ -100,7 +100,7 @@ export class GameRoom extends Room<GameState> {
     // Initialize adapters
     this.physics = new PhysicsAdapter({
       gravity: GRAVITY,
-      windIntegration: 0.1,
+      windIntegration: WIND_INTEGRATION,
     });
     this.validator = new MessageValidationAdapter();
     this.windManager = new WindManager({
@@ -132,7 +132,7 @@ export class GameRoom extends Room<GameState> {
     });
 
     this.onMessage('aimAngle', (client, data: { angle: number }) => {
-      this.broadcast('aimAngle', { angle: data.angle });
+      // Don't broadcast aim angle to other players - it's exclusive to each player's UI
     });
 
     this.onMessage('fire', (client, data: any) => {
@@ -302,7 +302,7 @@ export class GameRoom extends Room<GameState> {
             });
 
             if (hitPlayer.health <= 0) {
-              // Player defeated
+              this.killPlayer(collision.playerId!, 'destroyed');
             }
           }
         } else if (collision.type === 'terrain') {
@@ -404,11 +404,37 @@ export class GameRoom extends Room<GameState> {
 
     // Remove dead players
     for (const playerId of deadPlayers) {
-      this.state.players.delete(playerId);
-      if (this.state.currentPlayerId === playerId) {
-        const playerIds = Array.from(this.state.players.keys());
-        this.state.currentPlayerId = playerIds[0] || '';
-      }
+      this.killPlayer(playerId, 'outOfBounds');
+    }
+  }
+
+  /**
+   * Remove a player from the game the instant it dies.
+   *
+   * Broadcasts `playerDied` (carrying the last known position, so clients can
+   * play the death explosion where the player actually was) and then deletes the
+   * player from state in the same frame — clients must never keep rendering a
+   * corpse while waiting for a timeout.
+   */
+  private killPlayer(playerId: string, cause: 'destroyed' | 'outOfBounds') {
+    const player = this.state.players.get(playerId);
+    if (!player) return;
+
+    this.broadcast('playerDied', {
+      playerId,
+      x: player.x,
+      y: player.y,
+      cause,
+    });
+
+    this.state.players.delete(playerId);
+    this.playerInputs.delete(playerId);
+
+    // Any projectile fired by the dead player keeps flying, but the turn must
+    // move on to a survivor right away.
+    if (this.state.currentPlayerId === playerId) {
+      const playerIds = Array.from(this.state.players.keys());
+      this.state.currentPlayerId = playerIds[0] || '';
     }
   }
 
