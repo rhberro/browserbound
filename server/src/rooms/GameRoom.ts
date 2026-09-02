@@ -424,8 +424,10 @@ export class GameRoom extends Room<GameState> {
     players: Map<string, { health: number }>;
     projectiles: Map<string, { x: number; y: number; firedBy: string }>;
   } {
+    // Include both active and pending projectiles to prevent double-firing within single frame
+    const allProjectiles = [...this.projectiles, ...this.pendingProjectiles];
     const projectilesMap = new Map(
-      this.projectiles.map((proj) => [proj.id, { x: proj.x, y: proj.y, firedBy: proj.firedBy }])
+      allProjectiles.map((proj) => [proj.id, { x: proj.x, y: proj.y, firedBy: proj.firedBy }])
     );
     const playersMap = new Map(
       Array.from(this.state.players.entries()).map(([id, player]) => [id, { health: player.health }])
