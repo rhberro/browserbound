@@ -8,6 +8,6 @@ const gameServer = new Server({
 
 gameServer.define('game', GameRoom);
 
-console.log('Starting BrowserBond Server on port 3002...');
+console.log('Starting BrowserBound Server on port 3002...');
 gameServer.listen(3002);
-console.log('🎮 BrowserBond Server listening on ws://localhost:3002');
+console.log('🎮 BrowserBound Server listening on ws://localhost:3002');

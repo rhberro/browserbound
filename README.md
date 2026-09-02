@@ -1,4 +1,4 @@
-# BrowserBond
+# BrowserBound
 
 A turn-based multiplayer artillery game for browsers, inspired by GunBound.
 
@@ -29,8 +29,8 @@ pnpm dev
 To run only one:
 
 ```bash
-pnpm --filter @browserbond/client dev    # Client only (port 3000)
-pnpm --filter @browserbond/server dev    # Server only (port 3002)
+pnpm --filter @browserbound/client dev    # Client only (port 3000)
+pnpm --filter @browserbound/server dev    # Server only (port 3002)
 ```
 
 ## Build
