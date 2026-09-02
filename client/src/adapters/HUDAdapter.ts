@@ -60,11 +60,12 @@ export class HUDAdapter {
           left: 50%;
           transform: translateX(-50%);
           display: flex;
-          gap: 24px;
-          padding: 16px;
+          gap: 32px;
+          padding: 20px 32px;
           background: rgba(22, 24, 38, 0.92);
           border: 1px solid var(--color-neutral-700);
           border-radius: 12px;
+          max-width: 90vw;
         "></div>
       </div>
     `;

@@ -2,11 +2,12 @@ import { InputAdapter } from '../adapters/InputAdapter';
 
 /**
  * WeaponSelector: Displays weapon selection buttons (1/2/3).
- * Independently subscribes to InputAdapter weapon selection state.
+ * Uses event delegation for persistent event handling.
  */
 export class WeaponSelector {
   private container: HTMLElement | null = null;
   private inputAdapter: InputAdapter;
+  private listenerAttached: boolean = false;
 
   constructor(inputAdapter: InputAdapter) {
     this.inputAdapter = inputAdapter;
@@ -28,7 +29,23 @@ export class WeaponSelector {
     `;
     parent.appendChild(this.container);
 
+    this.setupEventDelegation();
     this.update();
+  }
+
+  private setupEventDelegation(): void {
+    if (!this.container || this.listenerAttached) return;
+
+    this.container.addEventListener('click', (e: Event) => {
+      const target = e.target as HTMLElement;
+      const weaponNum = target.getAttribute('data-weapon');
+      if (weaponNum) {
+        this.inputAdapter.selectWeapon(parseInt(weaponNum));
+        this.update();
+      }
+    });
+
+    this.listenerAttached = true;
   }
 
   update(): void {
@@ -37,10 +54,10 @@ export class WeaponSelector {
     const selectedWeapon = this.inputAdapter.getSelectedWeapon();
 
     this.container.innerHTML = `
-      <label style="font-size: 11px; text-transform: uppercase; color: var(--color-neutral-500);">Weapon</label>
+      <label style="font-size: 10px; text-transform: uppercase; color: var(--color-neutral-500);">Weapon</label>
       <div style="display: flex; gap: 4px;">
-        <button id="weapon-1" data-weapon="1" style="
-          padding: 8px 12px;
+        <button data-weapon="1" style="
+          padding: 8px 14px;
           border: 1px solid ${selectedWeapon === 1 ? 'var(--color-accent)' : 'var(--color-neutral-700)'};
           background: ${selectedWeapon === 1 ? 'rgba(145, 132, 217, 0.1)' : 'transparent'};
           color: var(--color-text);
@@ -48,9 +65,10 @@ export class WeaponSelector {
           cursor: pointer;
           font-size: 12px;
           font-weight: ${selectedWeapon === 1 ? '600' : '400'};
+          transition: all 0.1s;
         ">1</button>
-        <button id="weapon-2" data-weapon="2" style="
-          padding: 8px 12px;
+        <button data-weapon="2" style="
+          padding: 8px 14px;
           border: 1px solid ${selectedWeapon === 2 ? 'var(--color-accent)' : 'var(--color-neutral-700)'};
           background: ${selectedWeapon === 2 ? 'rgba(145, 132, 217, 0.1)' : 'transparent'};
           color: var(--color-text);
@@ -58,9 +76,10 @@ export class WeaponSelector {
           cursor: pointer;
           font-size: 12px;
           font-weight: ${selectedWeapon === 2 ? '600' : '400'};
+          transition: all 0.1s;
         ">2</button>
-        <button id="weapon-3" data-weapon="3" style="
-          padding: 8px 12px;
+        <button data-weapon="3" style="
+          padding: 8px 14px;
           border: 1px solid ${selectedWeapon === 3 ? 'var(--color-accent)' : 'var(--color-neutral-700)'};
           background: ${selectedWeapon === 3 ? 'rgba(145, 132, 217, 0.1)' : 'transparent'};
           color: var(--color-text);
@@ -68,23 +87,10 @@ export class WeaponSelector {
           cursor: pointer;
           font-size: 12px;
           font-weight: ${selectedWeapon === 3 ? '600' : '400'};
+          transition: all 0.1s;
         ">3</button>
       </div>
     `;
-
-    this.attachEventListeners();
-  }
-
-  private attachEventListeners(): void {
-    for (let i = 1; i <= 3; i++) {
-      const btn = this.container?.querySelector(`#weapon-${i}`) as HTMLButtonElement;
-      if (btn) {
-        btn.addEventListener('click', () => {
-          this.inputAdapter.selectWeapon(i);
-          this.update();
-        });
-      }
-    }
   }
 
   destroy(): void {

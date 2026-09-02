@@ -2,12 +2,13 @@ import { InputAdapter, AimState } from '../adapters/InputAdapter';
 
 /**
  * FireButton: Fire button with charging visual feedback.
- * Independently subscribes to InputAdapter charging state.
+ * Uses event delegation for persistent event handling.
  */
 export class FireButton {
   private container: HTMLElement | null = null;
   private inputAdapter: InputAdapter;
-  private button: HTMLButtonElement | null = null;
+  private isMouseDown: boolean = false;
+  private listenerAttached: boolean = false;
 
   constructor(inputAdapter: InputAdapter) {
     this.inputAdapter = inputAdapter;
@@ -28,7 +29,40 @@ export class FireButton {
     `;
     parent.appendChild(this.container);
 
+    this.setupEventDelegation();
     this.update();
+  }
+
+  private setupEventDelegation(): void {
+    if (!this.container || this.listenerAttached) return;
+
+    this.container.addEventListener('mousedown', (e: Event) => {
+      const target = e.target as HTMLElement;
+      if (target.getAttribute('data-fire-button')) {
+        e.preventDefault();
+        this.isMouseDown = true;
+        this.inputAdapter.startCharging();
+        this.update();
+      }
+    });
+
+    document.addEventListener('mouseup', () => {
+      if (this.isMouseDown) {
+        this.isMouseDown = false;
+        this.inputAdapter.fire();
+        this.update();
+      }
+    });
+
+    this.container.addEventListener('mouseleave', () => {
+      if (this.isMouseDown) {
+        this.isMouseDown = false;
+        this.inputAdapter.release();
+        this.update();
+      }
+    });
+
+    this.listenerAttached = true;
   }
 
   update(): void {
@@ -37,43 +71,19 @@ export class FireButton {
     const aimState = this.inputAdapter.getAimState();
 
     this.container.innerHTML = `
-      <button id="fire-button" style="
-        padding: 12px 24px;
+      <button data-fire-button="true" style="
+        padding: 14px 32px;
         border: 2px solid var(--color-accent);
         background: transparent;
         color: var(--color-accent);
         border-radius: 8px;
         cursor: pointer;
         font-weight: 600;
-        font-size: 14px;
+        font-size: 15px;
         transition: all 0.1s ease-out;
-        ${aimState.isCharging ? 'box-shadow: 0 0 16px rgba(145, 132, 217, 0.6);' : ''}
+        ${aimState.isCharging ? 'box-shadow: 0 0 20px rgba(145, 132, 217, 0.8), inset 0 0 10px rgba(145, 132, 217, 0.3);' : ''}
       ">FIRE</button>
     `;
-
-    this.button = this.container.querySelector('#fire-button');
-    this.attachEventListeners();
-  }
-
-  private attachEventListeners(): void {
-    if (!this.button) return;
-
-    this.button.addEventListener('mousedown', (e) => {
-      e.preventDefault();
-      this.inputAdapter.startCharging();
-      this.update();
-    });
-
-    this.button.addEventListener('mouseup', (e) => {
-      e.preventDefault();
-      this.inputAdapter.fire();
-      this.update();
-    });
-
-    this.button.addEventListener('mouseleave', () => {
-      this.inputAdapter.release();
-      this.update();
-    });
   }
 
   destroy(): void {
