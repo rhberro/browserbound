@@ -236,7 +236,12 @@ export class GameRoom extends Room<GameState> {
           this.state.players.delete(clientId);
           if (this.state.currentPlayerId === clientId) {
             const playerIds = Array.from(this.state.players.keys());
-            this.state.currentPlayerId = playerIds[0] || '';
+            if (playerIds[0]) {
+              this.beginTurn(playerIds[0]);
+            } else {
+              this.state.currentPlayerId = '';
+              this.state.turnEndsAt = 0;
+            }
           }
         }
       }
