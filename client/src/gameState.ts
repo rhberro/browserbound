@@ -33,6 +33,12 @@ export class GameState {
     this.room = await this.client.joinOrCreate('game');
     console.log('Joined game room:', this.room.sessionId);
 
+    if (this.room.state) {
+      // Initialize turnState immediately from current state (don't wait for onChange)
+      console.log('🎮 Initializing turnState from current state...');
+      this.updateTurnState();
+    }
+
     if (this.room.state && this.room.state.players) {
       this.room.state.players.onAdd((player: any, key: string) => {
         console.log('Player added:', key);
@@ -63,20 +69,28 @@ export class GameState {
     }
 
     if (this.room.state) {
-      // Listen for changes on root state fields
+      console.log('🔌 Setting up state listeners...');
+
+      // Track previous wind values to detect changes
+      let previousWindSpeed = this.room.state.windSpeed;
+      let previousWindDirection = this.room.state.windDirection;
+
+      // Listen for ANY changes on root state
       this.room.state.onChange(() => {
-        console.log('State changed - windSpeed:', this.room!.state.windSpeed, 'windDirection:', this.room!.state.windDirection);
-        this.updateTurnState();
-      });
+        const currentWindSpeed = this.room!.state.windSpeed;
+        const currentWindDirection = this.room!.state.windDirection;
 
-      // Also listen specifically to wind changes (windSpeed and windDirection)
-      this.room.state.onChange('windSpeed', (value: number) => {
-        console.log('Wind speed changed:', value);
-        this.updateTurnState();
-      });
+        // Check if wind values changed
+        if (previousWindSpeed !== currentWindSpeed) {
+          console.log(`💨 WIND SPEED CHANGED: ${previousWindSpeed} → ${currentWindSpeed}`);
+          previousWindSpeed = currentWindSpeed;
+        }
+        if (previousWindDirection !== currentWindDirection) {
+          console.log(`🧭 WIND DIRECTION CHANGED: ${previousWindDirection} → ${currentWindDirection}`);
+          previousWindDirection = currentWindDirection;
+        }
 
-      this.room.state.onChange('windDirection', (value: number) => {
-        console.log('Wind direction changed:', value);
+        console.log(`📡 [onChange triggered] Current: Speed=${currentWindSpeed}, Dir=${currentWindDirection}`);
         this.updateTurnState();
       });
     }
@@ -89,7 +103,7 @@ export class GameState {
       windSpeed: this.room.state.windSpeed,
       windDirection: this.room.state.windDirection,
     };
-    console.log('TurnState updated:', this.turnState);
+    console.log('📊 [updateTurnState] Speed:', this.turnState.windSpeed, 'Direction:', this.turnState.windDirection);
 
     this.room.onMessage('projectile', (data) => {
       console.log('Projectile fired:', data);
