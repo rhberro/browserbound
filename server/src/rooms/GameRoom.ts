@@ -10,7 +10,13 @@ import { PhysicsAdapter, Wind } from '@browserbond/shared/src/adapters/PhysicsAd
 import { MessageValidationAdapter } from '@browserbond/shared/src/adapters/MessageValidationAdapter';
 import { WindManager } from '../adapters/WindManager';
 import { loadMap, loadRandomMap, LoadedMap } from '../adapters/MapLoader';
-import { getWeapon, generateProjectileSpecs } from '@browserbond/shared/src/adapters/WeaponConfigAdapter';
+import {
+  getWeapon,
+  generateProjectileSpecs,
+  splashDamage,
+  splashRange,
+  knockbackImpulse,
+} from '@browserbond/shared/src/adapters/WeaponConfigAdapter';
 
 
 class Player extends Schema {
@@ -53,8 +59,9 @@ class GameProjectile {
   firedBy: string;
   id: string;
   fireFrame: number; // Frame quando o projétil foi disparado
+  weaponType: number; // Weapon that fired this projectile
 
-  constructor(x: number, y: number, vx: number, vy: number, firedBy: string, fireFrame: number = 0) {
+  constructor(x: number, y: number, vx: number, vy: number, firedBy: string, fireFrame: number = 0, weaponType: number = 1) {
     this.x = x;
     this.y = y;
     this.vx = vx;
@@ -62,6 +69,7 @@ class GameProjectile {
     this.firedBy = firedBy;
     this.id = Math.random().toString(36).substring(7);
     this.fireFrame = fireFrame;
+    this.weaponType = weaponType;
   }
 }
 
@@ -190,7 +198,8 @@ export class GameRoom extends Room<GameState> {
           vel.vx,
           vel.vy,
           client.sessionId,
-          this.currentFrame + spec.fireFrame
+          this.currentFrame + spec.fireFrame,
+          weaponType
         );
 
         allAngles.push(spec.angle);
@@ -313,32 +322,67 @@ export class GameRoom extends Room<GameState> {
       }
 
       if (collision) {
-        if (collision.type === 'player') {
-          const hitPlayer = this.state.players.get(collision.playerId!);
-          if (hitPlayer) {
-            hitPlayer.health -= 20;
+        const weapon = getWeapon(proj.weaponType);
+        const range = splashRange(weapon.splashRadius);
+        const affectedPlayers: string[] = [];
 
-            this.broadcast('collision', {
-              type: 'player',
-              projectileId: proj.id,
-              targetId: collision.playerId,
-              health: hitPlayer.health,
-              x: collision.x,
-              y: collision.y,
-            });
+        // On any collision, damage and knockback all characters within splash range
+        for (const [playerId, player] of this.state.players) {
+          // Skip the firer
+          if (playerId === proj.firedBy) continue;
 
-            if (hitPlayer.health <= 0) {
-              this.killPlayer(collision.playerId!, 'destroyed');
-            }
+          const dx = player.x - collision.x;
+          const dy = player.y - collision.y;
+          const dist = Math.hypot(dx, dy);
+
+          if (dist > range) continue; // Outside splash range
+
+          // Calculate damage and apply it
+          const dmg = splashDamage(dist, weapon.splashRadius, weapon.maxDamage);
+          if (dmg <= 0) continue;
+
+          player.health -= dmg;
+          affectedPlayers.push(playerId);
+
+          // Apply knockback
+          const kb = knockbackImpulse(dx, dy, dmg, weapon.knockbackScale);
+          if (kb.ix !== 0 || kb.iy !== 0) {
+            player.vx += kb.ix;
+            player.vy += kb.iy;
+            player.airborne = true;
+            this.airborneVxCarry.delete(playerId);
           }
+
+          if (player.health <= 0) {
+            this.killPlayer(playerId, 'destroyed');
+          }
+        }
+
+        // Broadcast collision details
+        if (collision.type === 'player') {
+          this.broadcast('collision', {
+            type: 'player',
+            projectileId: proj.id,
+            targetId: collision.playerId,
+            x: collision.x,
+            y: collision.y,
+            affectedPlayers: affectedPlayers.map(id => {
+              const p = this.state.players.get(id);
+              return { playerId: id, health: p?.health ?? 0 };
+            }),
+          });
         } else if (collision.type === 'terrain') {
-          this.destroyTerrain(collision.x, collision.y);
+          this.destroyTerrain(collision.x, collision.y, weapon.craterRadius);
 
           this.broadcast('collision', {
             type: 'terrain',
             projectileId: proj.id,
             x: collision.x,
             y: collision.y,
+            affectedPlayers: affectedPlayers.map(id => {
+              const p = this.state.players.get(id);
+              return { playerId: id, health: p?.health ?? 0 };
+            }),
           });
         } else if (collision.type === 'miss') {
           this.broadcast('collision', {
@@ -346,6 +390,10 @@ export class GameRoom extends Room<GameState> {
             projectileId: proj.id,
             x: collision.x,
             y: collision.y,
+            affectedPlayers: affectedPlayers.map(id => {
+              const p = this.state.players.get(id);
+              return { playerId: id, health: p?.health ?? 0 };
+            }),
           });
         }
 
