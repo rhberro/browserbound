@@ -378,6 +378,7 @@ export class GameRoom extends Room<GameState> {
     this.projectiles = this.projectiles.filter(p => !projectilesToRemove.includes(p.id));
 
     // If all projectiles are gone, change turn
+      console.log(`DEBUG: Turn change check - projectiles.length=${this.projectiles.length}, projectilesToRemove.length=${projectilesToRemove.length}`);
     if (this.projectiles.length === 0 && projectilesToRemove.length > 0) {
       const playerIds = Array.from(this.state.players.keys());
       const currentIndex = playerIds.indexOf(this.state.currentPlayerId);
@@ -397,6 +398,7 @@ export class GameRoom extends Room<GameState> {
           this.roundsCompleted = 0;
 
           // UPDATE STATE SO CLIENT RECEIVES NEW WIND VALUES
+          console.log(`DEBUG: Updating state - windSpeed: ${this.state.windSpeed} -> ${newWind.magnitude * 100}, windDirection: ${this.state.windDirection} -> ${newWind.angle}`);
           this.state.windSpeed = newWind.magnitude * 100;
           this.state.windDirection = newWind.angle;
 
