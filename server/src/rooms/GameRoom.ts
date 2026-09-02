@@ -3,6 +3,7 @@ import { Schema, type, MapSchema } from '@colyseus/schema';
 import { POWER_SCALE, GRAVITY, TerrainOp, MAP_WIDTH, MAP_HEIGHT, DEFAULT_CRATER_RADIUS, applyOpToBitmap } from '@browserbond/shared';
 import { PhysicsAdapter, Wind } from '@browserbond/shared/src/adapters/PhysicsAdapter';
 import { WindManager } from '../adapters/WindManager';
+import { getWeapon, generateProjectileSpecs } from '@browserbond/shared/src/adapters/WeaponConfigAdapter';
 
 
 class Player extends Schema {
@@ -132,105 +133,45 @@ export class GameRoom extends Room<GameState> {
       if (!player || client.sessionId !== this.state.currentPlayerId || this.projectiles.length > 0) return;
 
       const weaponType = data.weaponType || 1;
-
+      const weapon = getWeapon(weaponType);
+      const projectileSpecs = generateProjectileSpecs(weaponType, data.angle);
       const speed = data.power * POWER_SCALE;
 
-      // Criar projéteis baseado no tipo de arma
-      if (weaponType === 1) {
-        // Tiro normal - 1 projétil
-        const vel = this.physics.createProjectile(data.angle, data.power);
+      const projIds: string[] = [];
+      const allAngles: number[] = [];
+
+      for (const spec of projectileSpecs) {
+        const vel = this.physics.createProjectile(spec.angle, data.power);
         const proj = new GameProjectile(
           player.x,
           player.y,
           vel.vx,
           vel.vy,
           client.sessionId,
-          this.currentFrame
+          this.currentFrame + spec.fireFrame
         );
-        this.projectiles.push(proj);
 
-        this.broadcast('projectile', {
-          startX: player.x,
-          startY: player.y,
-          projectileIds: [proj.id],
-          angle: data.angle,
-          power: data.power,
-          weaponType: 1,
-          windSpeed: this.state.windSpeed,
-          windDirection: this.state.windDirection,
-        });
-      } else if (weaponType === 2) {
-        // Rajada - 3 projéteis em sequência com variação mínima
-        const angles = [
-          data.angle,
-          data.angle + (Math.random() * 0.4 - 0.2) * (Math.PI / 180),
-          data.angle + (Math.random() * 0.4 - 0.2) * (Math.PI / 180),
-        ];
+        allAngles.push(spec.angle);
+        projIds.push(proj.id);
 
-        const projIds: string[] = [];
-
-        // Criar todos os projéteis antecipadamente para ter IDs
-        // Cada um dispara 5 frames depois do anterior (16ms/frame ≈ 80ms)
-        const projectiles = angles.map((angle, index) => {
-          const proj = new GameProjectile(
-            player.x,
-            player.y,
-            Math.cos(angle) * speed,
-            -Math.sin(angle) * speed,
-            client.sessionId,
-            this.currentFrame + index * 5 // Fire at frame+0, frame+5, frame+10
-          );
-          projIds.push(proj.id);
-          return proj;
-        });
-
-        // Adicionar à fila de projéteis pendentes
-        this.pendingProjectiles.push(...projectiles);
-
-        // Enviar aviso que vai haver rajada
-        this.broadcast('projectile', {
-          startX: player.x,
-          startY: player.y,
-          projectileIds: projIds,
-          angles: angles,
-          power: data.power,
-          weaponType: 2,
-          windSpeed: this.state.windSpeed,
-          windDirection: this.state.windDirection,
-        });
-      } else if (weaponType === 3) {
-        // Shotgun - 3 projéteis simultâneos com ±1°
-        const angles = [
-          data.angle - (1 * Math.PI / 180),
-          data.angle,
-          data.angle + (1 * Math.PI / 180),
-        ];
-
-        const projIds: string[] = [];
-        for (const angle of angles) {
-          const proj = new GameProjectile(
-            player.x,
-            player.y,
-            Math.cos(angle) * speed,
-            -Math.sin(angle) * speed,
-            client.sessionId,
-            this.currentFrame // Todos disparam no mesmo frame
-          );
+        // If fireFrame is 0, add to active projectiles; otherwise add to pending
+        if (spec.fireFrame === 0) {
           this.projectiles.push(proj);
-          projIds.push(proj.id);
+        } else {
+          this.pendingProjectiles.push(proj);
         }
-
-        this.broadcast('projectile', {
-          startX: player.x,
-          startY: player.y,
-          projectileIds: projIds,
-          angles: angles,
-          power: data.power,
-          weaponType: 3,
-          windSpeed: this.state.windSpeed,
-          windDirection: this.state.windDirection,
-        });
       }
+
+      this.broadcast('projectile', {
+        startX: player.x,
+        startY: player.y,
+        projectileIds: projIds,
+        angles: allAngles,
+        power: data.power,
+        weaponType,
+        windSpeed: this.state.windSpeed,
+        windDirection: this.state.windDirection,
+      });
     });
   }
 
