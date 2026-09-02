@@ -66,6 +66,9 @@ export class GameRoom extends Room<GameState> {
   private currentFrame: number = 0;
   private physics!: PhysicsAdapter;
   private windManager!: WindManager;
+  private roundsCompleted: number = 0;
+  private currentWindDuration: number = 0;
+  private lastPlayerId: string = '';
 
   constructor(options: any) {
     super(options);
@@ -103,6 +106,10 @@ export class GameRoom extends Room<GameState> {
       magnitudeMin: 0.1,
       magnitudeMax: 0.5,
     });
+    // Initialize wind duration (in rounds, not frames)
+    const wind = this.windManager.getCurrentWind();
+    this.currentWindDuration = wind.framesRemaining;
+    this.roundsCompleted = 0;
 
     // Physics loop - update every 16ms
     this.setSimulationInterval(() => this.updatePhysics(), 16);
@@ -268,8 +275,7 @@ export class GameRoom extends Room<GameState> {
       return true; // Mantém na fila
     });
 
-    // Advance wind cycle
-    this.windManager.advance();
+    // Get current wind (changes only at end of rounds, not every frame)
     const wind: Wind = this.windManager.getCurrentWind();
 
     // Update state with wind info
@@ -375,7 +381,21 @@ export class GameRoom extends Room<GameState> {
     if (this.projectiles.length === 0 && projectilesToRemove.length > 0) {
       const playerIds = Array.from(this.state.players.keys());
       const currentIndex = playerIds.indexOf(this.state.currentPlayerId);
-      this.state.currentPlayerId = playerIds[(currentIndex + 1) % playerIds.length];
+      const nextIndex = (currentIndex + 1) % playerIds.length;
+      this.state.currentPlayerId = playerIds[nextIndex];
+
+      // Detect round completion: when we cycle back to first player
+      if (nextIndex === 0 && playerIds.length > 1) {
+        this.roundsCompleted++;
+        // Check if wind duration expired
+        if (this.roundsCompleted >= this.currentWindDuration) {
+          this.windManager.generateNewWind();
+          const newWind = this.windManager.getCurrentWind();
+          this.currentWindDuration = newWind.framesRemaining;
+          this.roundsCompleted = 0;
+          console.log(`Wind changed! New duration: ${this.currentWindDuration} rounds, Magnitude: ${newWind.magnitude.toFixed(2)}, Angle: ${(newWind.angle * 180 / Math.PI).toFixed(1)}°`);
+        }
+      }
     }
 
     // Update players

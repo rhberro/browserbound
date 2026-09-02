@@ -53,7 +53,7 @@ export class WindManager {
   /**
    * Generate a new random wind.
    */
-  private generateNewWind(): WindState {
+  generateNewWind(): WindState {
     const magnitude =
       Math.random() * (this.config.magnitudeMax - this.config.magnitudeMin) +
       this.config.magnitudeMin;
