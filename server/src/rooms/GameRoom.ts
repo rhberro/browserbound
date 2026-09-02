@@ -384,6 +384,7 @@ export class GameRoom extends Room<GameState> {
       const nextIndex = (currentIndex + 1) % playerIds.length;
       this.state.currentPlayerId = playerIds[nextIndex];
 
+
       // Detect round completion: when turn returns to first player
       // Solo: nextIndex = 0 every turn. Multiplayer: nextIndex = 0 after last player
       if (nextIndex === 0) {
