@@ -63,16 +63,33 @@ export class GameState {
     }
 
     if (this.room.state) {
+      // Listen for changes on root state fields
       this.room.state.onChange(() => {
         console.log('State changed - windSpeed:', this.room!.state.windSpeed, 'windDirection:', this.room!.state.windDirection);
-        this.turnState = {
-          currentPlayerId: this.room!.state.currentPlayerId,
-          windSpeed: this.room!.state.windSpeed,
-          windDirection: this.room!.state.windDirection,
-        };
-        console.log('TurnState updated:', this.turnState);
+        this.updateTurnState();
+      });
+
+      // Also listen specifically to wind changes (windSpeed and windDirection)
+      this.room.state.onChange('windSpeed', (value: number) => {
+        console.log('Wind speed changed:', value);
+        this.updateTurnState();
+      });
+
+      this.room.state.onChange('windDirection', (value: number) => {
+        console.log('Wind direction changed:', value);
+        this.updateTurnState();
       });
     }
+  }
+
+  private updateTurnState() {
+    if (!this.room?.state) return;
+    this.turnState = {
+      currentPlayerId: this.room.state.currentPlayerId,
+      windSpeed: this.room.state.windSpeed,
+      windDirection: this.room.state.windDirection,
+    };
+    console.log('TurnState updated:', this.turnState);
 
     this.room.onMessage('projectile', (data) => {
       console.log('Projectile fired:', data);

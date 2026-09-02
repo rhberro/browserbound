@@ -111,6 +111,11 @@ export class GameRoom extends Room<GameState> {
     this.currentWindDuration = wind.framesRemaining;
     this.roundsCompleted = 0;
 
+    // Set initial wind state
+    this.state.windSpeed = wind.magnitude * 100;
+    this.state.windDirection = wind.angle;
+    console.log(`🌪️ Initial wind set: Speed=${this.state.windSpeed.toFixed(1)}, Direction=${(this.state.windDirection * 180 / Math.PI).toFixed(1)}°`);
+
     // Physics loop - update every 16ms
     this.setSimulationInterval(() => this.updatePhysics(), 16);
 
@@ -278,9 +283,14 @@ export class GameRoom extends Room<GameState> {
     // Get current wind (changes only at end of rounds, not every frame)
     const wind: Wind = this.windManager.getCurrentWind();
 
-    // Update state with wind info
-    this.state.windSpeed = wind.magnitude * 100;
-    this.state.windDirection = wind.angle;
+    // Only update state if wind values have changed (avoid redundant Colyseus updates)
+    const newWindSpeed = wind.magnitude * 100;
+    const newWindDirection = wind.angle;
+    if (this.state.windSpeed !== newWindSpeed || this.state.windDirection !== newWindDirection) {
+      this.state.windSpeed = newWindSpeed;
+      this.state.windDirection = newWindDirection;
+      console.log(`🌪️ Wind state updated: Speed=${newWindSpeed.toFixed(1)}, Direction=${(newWindDirection * 180 / Math.PI).toFixed(1)}°`);
+    }
 
     // Update projectiles using PhysicsAdapter
     this.physics.updateAllProjectiles(this.projectiles, wind);
