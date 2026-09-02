@@ -384,8 +384,9 @@ export class GameRoom extends Room<GameState> {
       const nextIndex = (currentIndex + 1) % playerIds.length;
       this.state.currentPlayerId = playerIds[nextIndex];
 
-      // Detect round completion: when we cycle back to first player
-      if (nextIndex === 0 && playerIds.length > 1) {
+      // Detect round completion: when turn returns to first player
+      // Solo: nextIndex = 0 every turn. Multiplayer: nextIndex = 0 after last player
+      if (nextIndex === 0) {
         this.roundsCompleted++;
         // Check if wind duration expired
         if (this.roundsCompleted >= this.currentWindDuration) {
@@ -393,7 +394,7 @@ export class GameRoom extends Room<GameState> {
           const newWind = this.windManager.getCurrentWind();
           this.currentWindDuration = newWind.framesRemaining;
           this.roundsCompleted = 0;
-          console.log(`Wind changed! New duration: ${this.currentWindDuration} rounds, Magnitude: ${newWind.magnitude.toFixed(2)}, Angle: ${(newWind.angle * 180 / Math.PI).toFixed(1)}°`);
+          console.log(`🌪️ Wind changed! New duration: ${this.currentWindDuration} rounds, Magnitude: ${newWind.magnitude.toFixed(2)}, Angle: ${(newWind.angle * 180 / Math.PI).toFixed(1)}°`);
         }
       }
     }
