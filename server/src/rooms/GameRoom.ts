@@ -299,14 +299,9 @@ export class GameRoom extends Room<GameState> {
     // Get current wind (changes only at end of rounds, not every frame)
     const wind: Wind = this.windManager.getCurrentWind();
 
-    // Only update state if wind values have changed (avoid redundant Colyseus updates)
-    const newWindSpeed = wind.magnitude * 100;
-    const newWindDirection = wind.angle;
-    if (this.state.windSpeed !== newWindSpeed || this.state.windDirection !== newWindDirection) {
-      this.state.windSpeed = newWindSpeed;
-      this.state.windDirection = newWindDirection;
-      console.log(`🌪️ Wind state updated: Speed=${newWindSpeed.toFixed(1)}, Direction=${(newWindDirection * 180 / Math.PI).toFixed(1)}°`);
-    }
+    // Update wind state - Colyseus detects changes automatically
+    this.state.windSpeed = wind.magnitude * 100;
+    this.state.windDirection = wind.angle;
 
     // Update projectiles using PhysicsAdapter
     this.physics.updateAllProjectiles(this.projectiles, wind);
@@ -432,6 +427,12 @@ export class GameRoom extends Room<GameState> {
           const oldDir = this.state.windDirection;
           this.state.windSpeed = newWind.magnitude * 100;
           this.state.windDirection = newWind.angle;
+
+          // Explicitly broadcast wind change to ensure clients receive it
+          this.broadcast('windChanged', {
+            windSpeed: this.state.windSpeed,
+            windDirection: this.state.windDirection,
+          });
 
           console.log(`🌪️ WIND UPDATED!`);
           console.log(`   Speed: ${oldSpeed.toFixed(1)} → ${this.state.windSpeed.toFixed(1)}`);

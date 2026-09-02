@@ -186,6 +186,17 @@ export class GameState {
     this.room.onMessage('aimAngle', (data) => {
       this.currentPlayerAimAngle = data.angle;
     });
+
+    // Listen for explicit wind change messages
+    this.room.onMessage('windChanged', (data) => {
+      console.log(`🌬️ WIND CHANGED MESSAGE RECEIVED!`);
+      console.log(`   Speed: ${this.turnState?.windSpeed} → ${data.windSpeed}`);
+      console.log(`   Direction: ${this.turnState?.windDirection} → ${data.windDirection}`);
+      if (this.turnState) {
+        this.turnState.windSpeed = data.windSpeed;
+        this.turnState.windDirection = data.windDirection;
+      }
+    });
   }
 
   setOnTerrainOp(callback: (op: TerrainOp) => void) {
