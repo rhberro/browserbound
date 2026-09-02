@@ -151,4 +151,53 @@ export class InputAdapter {
     this.lastMoveUpdate = now;
     return true;
   }
+
+  /**
+   * Increment aim angle (called by HUD button).
+   */
+  angleUp(): void {
+    this.aimAngle = Math.min(90, this.aimAngle + 1.5);
+  }
+
+  /**
+   * Decrement aim angle (called by HUD button).
+   */
+  angleDown(): void {
+    this.aimAngle = Math.max(0, this.aimAngle - 1.5);
+  }
+
+  /**
+   * Select weapon (called by HUD button or keyboard).
+   */
+  selectWeapon(weaponType: number): void {
+    this.selectedWeapon = Math.max(1, Math.min(3, weaponType));
+  }
+
+  /**
+   * Start charging (called by HUD fire button mousedown).
+   */
+  startCharging(): void {
+    if (this.gameState.isMyTurn() && !this.isCharging) {
+      this.isCharging = true;
+      this.aimPower = 0;
+    }
+  }
+
+  /**
+   * Release charge (called by HUD fire button mouseleave/mouseup without firing).
+   */
+  release(): void {
+    this.isCharging = false;
+  }
+
+  /**
+   * Fire the weapon (called by HUD fire button or when shouldFire() is true).
+   */
+  fire(): void {
+    if (this.isCharging && this.aimPower > 0) {
+      this.isCharging = false;
+      this.gameState.fire(this.aimAngle, this.aimPower, this.selectedWeapon);
+      this.resetAfterFire();
+    }
+  }
 }

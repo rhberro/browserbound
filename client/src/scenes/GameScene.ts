@@ -3,6 +3,7 @@ import { GameState } from '../gameState';
 import { InputAdapter } from '../adapters/InputAdapter';
 import { CameraAdapter } from '../adapters/CameraAdapter';
 import { RendererAdapter } from '../adapters/RendererAdapter';
+import { HUDAdapter } from '../adapters/HUDAdapter';
 
 export class GameScene {
   private app: PIXI.Application;
@@ -13,6 +14,7 @@ export class GameScene {
   private inputAdapter: InputAdapter;
   private cameraAdapter: CameraAdapter;
   private rendererAdapter: RendererAdapter;
+  private hudAdapter: HUDAdapter;
 
   constructor(app: PIXI.Application, gameState: GameState) {
     this.app = app;
@@ -24,12 +26,16 @@ export class GameScene {
     this.inputAdapter = new InputAdapter(gameState);
     this.cameraAdapter = new CameraAdapter(app, this.container);
     this.rendererAdapter = new RendererAdapter(app, this.container);
+    this.hudAdapter = new HUDAdapter(gameState, this.inputAdapter);
 
     // Set up terrain operations
     this.gameState.setOnTerrainOp((op) => this.rendererAdapter.applyTerrainOp(op));
 
     // Set up input after a short delay to ensure DOM is ready
-    setTimeout(() => this.inputAdapter.setupInput(), 100);
+    setTimeout(() => {
+      this.inputAdapter.setupInput();
+      this.hudAdapter.initialize();
+    }, 100);
   }
 
   private getMyPlayer() {
@@ -86,6 +92,9 @@ export class GameScene {
       aimState,
       this.inputAdapter.getSelectedWeapon()
     );
+
+    // Update HUD
+    this.hudAdapter.update(aimState);
 
     // Clear collision state after explosion finishes
     if (this.gameState.collision) {
