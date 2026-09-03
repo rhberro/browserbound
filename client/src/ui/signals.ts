@@ -28,6 +28,14 @@ export const movementBudgetMax = signal(MOVE_BUDGET);
 /** Whole seconds left in the current turn. */
 export const turnSeconds = signal(0);
 
+/** Match outcome. `matchEnded` gates the whole result overlay. */
+export const matchEnded = signal(false);
+export const winnerId = signal('');
+export const mySessionId = signal('');
+/** How many players have asked for a rematch, and how many are here. */
+export const rematchReady = signal(0);
+export const rematchOf = signal(0);
+
 /**
  * False while our OWN connection is dropped and being retried.
  *
@@ -70,6 +78,22 @@ export const isOutOfMovement = computed(
 );
 
 export const turnSecondsText = computed(() => `${turnSeconds.value}s`);
+
+/**
+ * The result, from this player's point of view.
+ *
+ * An empty winner is a DRAW, not a loss — both characters died in the same
+ * exchange. Reporting that as a loss to both players would be wrong for both.
+ */
+export const matchResultText = computed(() => {
+  if (!matchEnded.value) return '';
+  if (winnerId.value === '') return 'Draw';
+  return winnerId.value === mySessionId.value ? 'You win' : 'You lose';
+});
+
+export const rematchText = computed(() =>
+  rematchOf.value > 1 ? `Rematch (${rematchReady.value}/${rematchOf.value})` : 'Rematch'
+);
 /** The last five seconds of a turn, when the countdown should read as urgent. */
 export const isTurnEnding = computed(() => isMyTurn.value && turnSeconds.value > 0 && turnSeconds.value <= 5);
 
@@ -127,6 +151,12 @@ export function syncHudSignals(gameState: GameState, inputAdapter: InputAdapter)
 
   const me = gameState.getMyPlayer();
   movementBudget.value = me ? me.movementBudget : 0;
+
+  if (turnState) {
+    matchEnded.value = turnState.matchPhase === 'ended';
+    winnerId.value = turnState.winnerId;
+  }
+  mySessionId.value = gameState.getRoomSessionId() ?? '';
 
   commitLastShot(aim);
 }

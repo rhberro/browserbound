@@ -1,5 +1,6 @@
 import { StatusPill } from './components/StatusPill';
 import { ConnectionBanner } from './components/ConnectionBanner';
+import { MatchResult } from './components/MatchResult';
 import { AngleControl } from './components/AngleControl';
 import { PowerBar } from './components/PowerBar';
 import { MovementBudget } from './components/MovementBudget';
@@ -7,6 +8,7 @@ import { TurnClock } from './components/TurnClock';
 import { WeaponSelector } from './components/WeaponSelector';
 import { FireButton } from './components/FireButton';
 import { deckStateClass } from './signals';
+import type { GameState } from '../gameState';
 
 /**
  * The HUD overlay: a status pill along the top and the control deck along the
@@ -16,9 +18,11 @@ import { deckStateClass } from './signals';
  * only the pill and the deck opt back in, so clicks anywhere else reach the
  * canvas underneath.
  */
-export function HudRoot() {
+export function HudRoot({ gameState }: { gameState: GameState }) {
   return (
-    <div class="flex h-full flex-col justify-between">
+    <div class="relative flex h-full flex-col justify-between">
+      <MatchResult gameState={gameState} />
+
       <div>
         <StatusPill />
         <ConnectionBanner />

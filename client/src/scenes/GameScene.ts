@@ -4,7 +4,7 @@ import { InputAdapter } from '../adapters/InputAdapter';
 import { CameraAdapter } from '../adapters/CameraAdapter';
 import { RendererAdapter } from '../adapters/RendererAdapter';
 import { mountHud } from '../ui/mountHud';
-import { syncHudSignals, isConnected } from '../ui/signals';
+import { syncHudSignals, isConnected, rematchReady, rematchOf } from '../ui/signals';
 
 export class GameScene {
   private app: PIXI.Application;
@@ -45,13 +45,18 @@ export class GameScene {
       isConnected.value = connected;
     };
 
+    this.gameState.onRematchReady = (ready, of) => {
+      rematchReady.value = ready;
+      rematchOf.value = of;
+    };
+
     // Blow up players the moment the server reports them dead
     this.gameState.onPlayerDied = (_playerId, x, y) => {
       this.rendererAdapter.spawnDeathExplosion(x, y);
     };
 
     this.inputAdapter.setupInput();
-    mountHud(this.inputAdapter);
+    mountHud(this.inputAdapter, this.gameState);
   }
 
   update(deltaMS: number) {

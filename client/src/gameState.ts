@@ -85,6 +85,9 @@ export class GameState {
   /** Notified when the connection drops and again when it is restored. */
   public onConnectionChange: ((connected: boolean) => void) | null = null;
 
+  /** Notified as players vote for a rematch: how many are ready, out of how many. */
+  public onRematchReady: ((ready: number, of: number) => void) | null = null;
+
   private storedToken(): string | null {
     try {
       return sessionStorage.getItem(GameState.TOKEN_KEY);
@@ -301,6 +304,10 @@ export class GameState {
       }
     });
 
+    this.room.onMessage('rematchReady', (data: { ready: number; of: number }) => {
+      this.onRematchReady?.(data.ready, data.of);
+    });
+
     this.room.onMessage('windChanged', (data) => {
       if (this.turnState) {
         this.turnState.windSpeed = data.windSpeed;
@@ -317,6 +324,8 @@ export class GameState {
       windSpeed: state.windSpeed,
       windDirection: state.windDirection,
       turnSecondsRemaining: state.turnSecondsRemaining,
+      matchPhase: state.matchPhase,
+      winnerId: state.winnerId,
     };
   }
 
@@ -373,6 +382,11 @@ export class GameState {
     if (this.room) {
       this.room.send('fire', { power, weaponType });
     }
+  }
+
+  /** Ask for a rematch. The match restarts once every client here has asked. */
+  requestRematch() {
+    this.room?.send('rematch');
   }
 
   sendAimAngle(angle: number) {

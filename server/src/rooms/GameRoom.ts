@@ -85,6 +85,15 @@ export class GameRoom extends Room<RoomState> {
    * remaining duration instead, because their clocks do not agree with this one.
    */
   private turnEndsAtMs: number = 0;
+  /**
+   * True once the match has had two characters in it at the same time.
+   *
+   * Without this, "fewer than two characters remain" is true before the second
+   * player has ever joined, and every room would end the instant it opened.
+   */
+  private matchStarted: boolean = false;
+  /** Sessions that have asked for a rematch since the match ended. */
+  private rematchReady: Set<string> = new Set();
   /** Fractional vx accumulation for airborne horizontal stepping. */
   private airborneVxCarry: Map<string, number> = new Map();
   private map!: LoadedMap;
@@ -156,6 +165,16 @@ export class GameRoom extends Room<RoomState> {
 
       // Clamp chassis-relative aim angle to valid range (in degrees, convert to radians)
       player.aimAngle = degToRad(clampAimDeg(data.angle));
+    });
+
+    this.onMessage('rematch', (client) => {
+      if (this.state.matchPhase !== 'ended') return;
+      this.rematchReady.add(client.sessionId);
+      this.broadcast('rematchReady', {
+        ready: this.rematchReady.size,
+        of: this.clients.length,
+      });
+      this.considerRematch();
     });
 
     this.onMessage('fire', (client, data: any) => {
@@ -236,6 +255,35 @@ export class GameRoom extends Room<RoomState> {
     this.state.turnSecondsRemaining = Math.max(0, Math.ceil(msLeft / 1000));
   }
 
+  /**
+   * End the match if fewer than two characters remain.
+   *
+   * Deliberately gated on matchStarted: before the second player joins there is
+   * legitimately one character, and that is a room waiting to fill, not a match
+   * won. Idempotent, because every removal path calls it and a final exchange
+   * can remove two characters in one frame.
+   */
+  private checkMatchEnd(): void {
+    if (!this.matchStarted || this.state.matchPhase === 'ended') return;
+    if (this.state.players.size >= 2) return;
+
+    const survivors = Array.from(this.state.players.keys());
+    this.state.matchPhase = 'ended';
+    // Empty means a draw. A mutual kill leaves nobody, and picking an
+    // arbitrary winner from an empty field would be a lie.
+    this.state.winnerId = survivors.length === 1 ? survivors[0] : '';
+
+    // Nobody's turn, no clock, no more wind changes.
+    this.state.currentPlayerId = '';
+    this.endTurnClock();
+    this.rematchReady.clear();
+
+    this.broadcast('matchEnded', {
+      winnerId: this.state.winnerId,
+      draw: this.state.winnerId === '',
+    });
+  }
+
   private endTurnClock(): void {
     this.turnEndsAtMs = 0;
     this.state.turnSecondsRemaining = 0;
@@ -245,6 +293,65 @@ export class GameRoom extends Room<RoomState> {
   private activate(proj: Projectile) {
     proj.activatedFrame = this.currentFrame;
     this.state.projectiles.set(proj.id, proj);
+  }
+
+  /**
+   * Start a fresh match with the players already here.
+   *
+   * A new map, full health, spawns reassigned, terrain log cleared. Everything
+   * that could carry a finished match into a new one is reset here rather than
+   * relying on the room being recreated, because the whole point is that
+   * nobody has to reconnect.
+   */
+  private startRematch(): void {
+    this.rematchReady.clear();
+    this.terrainOps = [];
+    this.initializeTerrainPlatform();
+
+    this.state.projectiles.clear();
+    this.pendingProjectiles = [];
+    this.walkCarry.clear();
+    this.airborneVxCarry.clear();
+    this.blockedNotified.clear();
+    this.playerInputs.clear();
+
+    // Everyone still connected gets a character again, including whoever lost
+    // the last match and had theirs removed.
+    this.state.players.clear();
+    this.clients.forEach((client, index) => {
+      const player = new Player();
+      player.id = client.sessionId;
+      const spawn = this.map.spawns[index % this.map.spawns.length];
+      player.x = spawn.x;
+      player.y = spawn.y;
+      player.health = 100;
+      this.state.players.set(client.sessionId, player);
+    });
+
+    this.matchStarted = this.state.players.size >= 2;
+    this.state.matchPhase = 'playing';
+    this.state.winnerId = '';
+    this.roundsCompleted = 0;
+
+    this.broadcast('terrainSync', { mapId: this.map.id, ops: this.terrainOps });
+
+    const first = Array.from(this.state.players.keys())[0];
+    if (first) this.beginTurn(first);
+    else this.endTurnClock();
+  }
+
+  /**
+   * Begin a rematch once every connected client has asked for one.
+   *
+   * Recomputed on departure as well as on request, so a player who
+   * disconnects while the other is waiting cannot hold the room in a finished
+   * match forever.
+   */
+  private considerRematch(): void {
+    if (this.state.matchPhase !== 'ended') return;
+    if (this.clients.length === 0) return;
+    if (this.rematchReady.size < this.clients.length) return;
+    this.startRematch();
   }
 
   private isSolidAt(x: number, y: number): boolean {
@@ -436,6 +543,7 @@ export class GameRoom extends Room<RoomState> {
     // Pass the turn only once nothing is airborne AND nothing is still staged
     // to fire. See shouldAdvanceTurn for why the staged term matters.
     if (
+      this.state.matchPhase === 'playing' &&
       this.state.currentPlayerId === turnOwnerBeforeCollisions &&
       shouldAdvanceTurn({
         active: this.state.projectiles.size,
@@ -451,6 +559,7 @@ export class GameRoom extends Room<RoomState> {
     // is what the reconnection window in onLeave is for, and only a genuinely
     // dropped connection triggers it.
     if (
+      this.state.matchPhase === 'playing' &&
       this.state.currentPlayerId &&
       this.nothingInFlight() &&
       this.turnEndsAtMs > 0 &&
@@ -706,6 +815,11 @@ export class GameRoom extends Room<RoomState> {
     this.blockedNotified.delete(playerId);
     this.airborneVxCarry.delete(playerId);
 
+    // Losing a character can end the match, so this is checked before the turn
+    // is handed on — there may be nobody left to hand it to.
+    this.checkMatchEnd();
+    if (this.state.matchPhase === 'ended') return;
+
     if (this.state.currentPlayerId !== playerId) return;
 
     const playerIds = Array.from(this.state.players.keys());
@@ -771,6 +885,7 @@ export class GameRoom extends Room<RoomState> {
     player.health = 100;
 
     this.state.players.set(client.sessionId, player);
+    if (this.state.players.size >= 2) this.matchStarted = true;
 
     // Ensure currentPlayerId always points to a valid player, and that whoever
     // holds the turn actually has a budget and a deadline.
@@ -791,8 +906,16 @@ export class GameRoom extends Room<RoomState> {
    * migration should be a rewire of this method, not a hunt.
    */
   async onLeave(client: Client, consented?: boolean) {
+    // A player whose character was destroyed is still a client — they are
+    // watching the result and may want a rematch — so this bookkeeping runs
+    // whether or not they still have a character on the field.
+    this.rematchReady.delete(client.sessionId);
+
     const player = this.state.players.get(client.sessionId);
-    if (!player) return;
+    if (!player) {
+      this.considerRematch();
+      return;
+    }
 
     // Whether or not they come back, they are not holding a key right now.
     // Without this a player who disconnects mid-walk keeps walking.
@@ -802,6 +925,7 @@ export class GameRoom extends Room<RoomState> {
       // A deliberate leave is a decision, not an accident. Do not make the
       // opponent wait out a window for someone who has already gone.
       this.removePlayer(client.sessionId);
+      this.considerRematch();
       return;
     }
 
@@ -817,6 +941,7 @@ export class GameRoom extends Room<RoomState> {
       // Window expired, or the room was disposed underneath us. removePlayer
       // is idempotent, so a disposal race cannot pass the turn twice.
       this.removePlayer(client.sessionId);
+      this.considerRematch();
     }
   }
 }

@@ -71,8 +71,25 @@ export class Projectile extends Schema {
   weaponType = 1;
 }
 
+/**
+ * Whether the match is still being played.
+ *
+ * 'ended' freezes the turn loop, the turn clock and the wind: with one
+ * character left there is nobody to pass the turn to, and a lone survivor was
+ * previously left playing on their own indefinitely.
+ */
+export type MatchPhase = 'playing' | 'ended';
+
 export class RoomState extends Schema {
   @type('string') currentPlayerId = '';
+  @type('string') matchPhase: MatchPhase = 'playing';
+  /**
+   * Session id of the winner once the match has ended.
+   *
+   * Empty string means a DRAW — both characters died in the same exchange —
+   * which is why the winner is not simply inferred from whoever is left.
+   */
+  @type('string') winnerId = '';
   @type('number') windSpeed = 5;
   @type('number') windDirection = 0;
   /**
@@ -122,5 +139,10 @@ export type ProjectileView = Pick<Projectile, 'x' | 'y'>;
 /** The client's picture of the room, minus the maps it reads separately. */
 export type TurnView = Pick<
   RoomState,
-  'currentPlayerId' | 'windSpeed' | 'windDirection' | 'turnSecondsRemaining'
+  | 'currentPlayerId'
+  | 'windSpeed'
+  | 'windDirection'
+  | 'turnSecondsRemaining'
+  | 'matchPhase'
+  | 'winnerId'
 >;
