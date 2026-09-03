@@ -364,9 +364,15 @@ export class GameState {
     }
   }
 
-  fire(angle: number, power: number, weaponType: number = 1) {
+  /**
+   * No angle: the server derives the firing direction from the character's
+   * chassis tilt, stored aim angle and facing. Sending one meant the client
+   * computed a world angle the server ignored, which is precisely how the two
+   * drifted apart.
+   */
+  fire(power: number, weaponType: number = 1) {
     if (this.room) {
-      this.room.send('fire', { angle, power, weaponType });
+      this.room.send('fire', { power, weaponType });
     }
   }
 

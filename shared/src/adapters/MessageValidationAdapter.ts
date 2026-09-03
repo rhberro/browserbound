@@ -13,8 +13,14 @@ export interface ValidationResult {
   reason?: string;
 }
 
+/**
+ * No angle. The firing direction is derived on the server from the character's
+ * chassis tilt, its stored aim angle and its facing (see `worldFiringAngle`);
+ * a client-supplied angle was accepted, range-checked and then ignored. Worse,
+ * the range check was [0, PI], which would have rejected the twenty degrees
+ * below the horizontal that ADR 0003's aim range permits.
+ */
 interface FireMessage {
-  angle: number;
   power: number;
   weaponType: number;
 }
@@ -70,8 +76,6 @@ function isObject(value: unknown): value is Record<string, unknown> {
 }
 
 export class MessageValidationAdapter {
-  private static readonly ANGLE_MIN = 0;
-  private static readonly ANGLE_MAX = Math.PI;
   private static readonly POWER_MIN = 0;
   private static readonly POWER_MAX = 100;
   private static readonly MAP_MARGIN = 100;
@@ -87,9 +91,6 @@ export class MessageValidationAdapter {
     if (!isObject(message)) {
       return { valid: false, reason: 'fire message is not an object' };
     }
-    if (!isFiniteNumber(message.angle)) {
-      return { valid: false, reason: 'angle must be a finite number' };
-    }
     if (!isFiniteNumber(message.power)) {
       return { valid: false, reason: 'power must be a finite number' };
     }
@@ -104,15 +105,7 @@ export class MessageValidationAdapter {
       return { valid: false, reason: 'player has active projectiles' };
     }
 
-    // 3. Angle bounds: [0, π]
-    if (message.angle < MessageValidationAdapter.ANGLE_MIN || message.angle > MessageValidationAdapter.ANGLE_MAX) {
-      return {
-        valid: false,
-        reason: `angle out of bounds [${MessageValidationAdapter.ANGLE_MIN}, ${MessageValidationAdapter.ANGLE_MAX}]`,
-      };
-    }
-
-    // 4. Power bounds: [0, 100]
+    // 3. Power bounds: [0, 100]
     if (message.power < MessageValidationAdapter.POWER_MIN || message.power > MessageValidationAdapter.POWER_MAX) {
       return {
         valid: false,
@@ -120,7 +113,7 @@ export class MessageValidationAdapter {
       };
     }
 
-    // 5. Weapon type must exist
+    // 4. Weapon type must exist
     if (!WEAPONS[message.weaponType]) {
       return { valid: false, reason: `unknown weapon type ${message.weaponType}` };
     }

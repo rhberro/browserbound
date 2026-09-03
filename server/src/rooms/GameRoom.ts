@@ -1,12 +1,12 @@
 import { Room, Client } from 'colyseus';
 import { Schema, type, MapSchema } from '@colyseus/schema';
 import {
-  POWER_SCALE, GRAVITY, WIND_INTEGRATION, TerrainOp, MAP_WIDTH, MAP_HEIGHT,
+  GRAVITY, WIND_INTEGRATION, TerrainOp, MAP_WIDTH, MAP_HEIGHT,
   DEFAULT_CRATER_RADIUS, applyOpToBitmap, collapseLips, PLAYER_HEIGHT,
   MOVE_BUDGET, WALK_SPEED, TURN_TIME_MS, TERMINAL_VELOCITY,
   PROJECTILE_MAX_LIFETIME_FRAMES, RECONNECT_WINDOW_SECONDS,
-  AIM_MIN_DEG, AIM_MAX_DEG,
   walkStep, settle, testCollisionY, pushOutOfWall, airborneHorizontal, computeTilt, Body,
+  worldFiringAngle, clampAimDeg, degToRad,
 } from '@browserbond/shared';
 import { PhysicsAdapter, Wind } from '@browserbond/shared/src/adapters/PhysicsAdapter';
 import { MessageValidationAdapter } from '@browserbond/shared/src/adapters/MessageValidationAdapter';
@@ -190,10 +190,7 @@ export class GameRoom extends Room<GameState> {
       if (!player) return;
 
       // Clamp chassis-relative aim angle to valid range (in degrees, convert to radians)
-      const clampedDeg = Math.max(AIM_MIN_DEG, Math.min(AIM_MAX_DEG, data.angle));
-      player.aimAngle = (clampedDeg * Math.PI) / 180;
-
-      // Don't broadcast aim angle to other players - it's exclusive to each player's UI
+      player.aimAngle = degToRad(clampAimDeg(data.angle));
     });
 
     this.onMessage('fire', (client, data: any) => {
@@ -208,16 +205,11 @@ export class GameRoom extends Room<GameState> {
       const weaponType = data.weaponType || 1;
       const weapon = getWeapon(weaponType);
 
-      // Calculate world angle from chassis-relative aim + tilt + facing
-      // World angle = tilt + aimAngle, then mirror for facing (left-facing player)
-      let worldAngle = player.tilt + player.aimAngle;
-      if (player.facing === -1) {
-        // Left-facing: mirror the angle around vertical (π - angle)
-        worldAngle = Math.PI - worldAngle;
-      }
+      // The server owns the firing direction end to end. The client sends no
+      // angle at all — it draws its aim line through this same function.
+      const worldAngle = worldFiringAngle(player);
 
       const projectileSpecs = generateProjectileSpecs(weaponType, worldAngle);
-      const speed = data.power * POWER_SCALE;
 
       // Firing ends movement and forfeits the remaining budget. The turn
       // itself passes once the projectiles resolve.

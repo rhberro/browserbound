@@ -33,7 +33,7 @@ describe('MessageValidationAdapter', () => {
   describe('validateFireMessage', () => {
     it('accepts valid fire message', () => {
       const result = validator.validateFireMessage(
-        { angle: Math.PI / 4, power: 50, weaponType: 1 },
+        { power: 50, weaponType: 1 },
         gameState,
         'player-1'
       );
@@ -43,7 +43,7 @@ describe('MessageValidationAdapter', () => {
 
     it('rejects fire when player not in current turn', () => {
       const result = validator.validateFireMessage(
-        { angle: Math.PI / 4, power: 50, weaponType: 1 },
+        { power: 50, weaponType: 1 },
         gameState,
         'player-2'
       );
@@ -51,47 +51,13 @@ describe('MessageValidationAdapter', () => {
       expect(result.reason).toContain('not in current turn');
     });
 
-    it('rejects fire with angle < 0', () => {
-      const result = validator.validateFireMessage(
-        { angle: -0.1, power: 50, weaponType: 1 },
-        gameState,
-        'player-1'
-      );
-      expect(result.valid).toBe(false);
-      expect(result.reason).toContain('angle out of bounds');
-    });
 
-    it('rejects fire with angle > π', () => {
-      const result = validator.validateFireMessage(
-        { angle: Math.PI + 0.1, power: 50, weaponType: 1 },
-        gameState,
-        'player-1'
-      );
-      expect(result.valid).toBe(false);
-      expect(result.reason).toContain('angle out of bounds');
-    });
 
-    it('accepts fire with angle = 0 (boundary)', () => {
-      const result = validator.validateFireMessage(
-        { angle: 0, power: 50, weaponType: 1 },
-        gameState,
-        'player-1'
-      );
-      expect(result.valid).toBe(true);
-    });
 
-    it('accepts fire with angle = π (boundary)', () => {
-      const result = validator.validateFireMessage(
-        { angle: Math.PI, power: 50, weaponType: 1 },
-        gameState,
-        'player-1'
-      );
-      expect(result.valid).toBe(true);
-    });
 
     it('rejects fire with power < 0', () => {
       const result = validator.validateFireMessage(
-        { angle: Math.PI / 4, power: -1, weaponType: 1 },
+        { power: -1, weaponType: 1 },
         gameState,
         'player-1'
       );
@@ -101,7 +67,7 @@ describe('MessageValidationAdapter', () => {
 
     it('rejects fire with power > 100', () => {
       const result = validator.validateFireMessage(
-        { angle: Math.PI / 4, power: 101, weaponType: 1 },
+        { power: 101, weaponType: 1 },
         gameState,
         'player-1'
       );
@@ -111,7 +77,7 @@ describe('MessageValidationAdapter', () => {
 
     it('accepts fire with power = 0 (boundary)', () => {
       const result = validator.validateFireMessage(
-        { angle: Math.PI / 4, power: 0, weaponType: 1 },
+        { power: 0, weaponType: 1 },
         gameState,
         'player-1'
       );
@@ -120,7 +86,7 @@ describe('MessageValidationAdapter', () => {
 
     it('accepts fire with power = 100 (boundary)', () => {
       const result = validator.validateFireMessage(
-        { angle: Math.PI / 4, power: 100, weaponType: 1 },
+        { power: 100, weaponType: 1 },
         gameState,
         'player-1'
       );
@@ -129,7 +95,7 @@ describe('MessageValidationAdapter', () => {
 
     it('rejects fire with unknown weapon type', () => {
       const result = validator.validateFireMessage(
-        { angle: Math.PI / 4, power: 50, weaponType: 999 },
+        { power: 50, weaponType: 999 },
         gameState,
         'player-1'
       );
@@ -140,7 +106,7 @@ describe('MessageValidationAdapter', () => {
     it('rejects fire when player has active projectiles', () => {
       gameState.projectiles.set('proj-1', { x: 100, y: 100, firedBy: 'player-1' });
       const result = validator.validateFireMessage(
-        { angle: Math.PI / 4, power: 50, weaponType: 1 },
+        { power: 50, weaponType: 1 },
         gameState,
         'player-1'
       );
@@ -168,7 +134,7 @@ describe('MessageValidationAdapter', () => {
       for (const [label, value] of NOT_NUMBERS) {
         it(`rejects fire with ${label} as power`, () => {
           const result = validator.validateFireMessage(
-            { angle: Math.PI / 4, power: value as never, weaponType: 1 },
+            { power: value as never, weaponType: 1 },
             gameState,
             'player-1'
           );
@@ -176,15 +142,6 @@ describe('MessageValidationAdapter', () => {
           expect(result.reason).toContain('power');
         });
 
-        it(`rejects fire with ${label} as angle`, () => {
-          const result = validator.validateFireMessage(
-            { angle: value as never, power: 50, weaponType: 1 },
-            gameState,
-            'player-1'
-          );
-          expect(result.valid).toBe(false);
-          expect(result.reason).toContain('angle');
-        });
       }
 
       it('rejects a fire message that is not an object at all', () => {
@@ -200,7 +157,7 @@ describe('MessageValidationAdapter', () => {
     it('allows fire when other player has projectiles', () => {
       gameState.projectiles.set('proj-1', { x: 100, y: 100, firedBy: 'player-2' } as any);
       const result = validator.validateFireMessage(
-        { angle: Math.PI / 4, power: 50, weaponType: 1 },
+        { power: 50, weaponType: 1 },
         gameState,
         'player-1'
       );

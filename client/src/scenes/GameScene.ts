@@ -111,13 +111,10 @@ export class GameScene {
   private fire() {
     if (!this.gameState.isMyTurn()) return;
 
-    const myPlayer = this.getMyPlayer();
-    const facing = myPlayer ? (myPlayer as any).facing || 1 : 1;
+    // Power and weapon only. The firing direction is the server's, computed
+    // from the aim angle already sent, the chassis tilt and the facing.
     const aimState = this.inputAdapter.getAimState();
-    const relativeAngle = facing === 1 ? aimState.angle : 180 - aimState.angle;
-    const radians = (relativeAngle * Math.PI) / 180;
-
-    this.gameState.fire(radians, aimState.power, this.inputAdapter.getSelectedWeapon());
+    this.gameState.fire(aimState.power, this.inputAdapter.getSelectedWeapon());
     this.inputAdapter.resetAfterFire();
   }
 }
