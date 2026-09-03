@@ -18,9 +18,20 @@
 
 import * as PIXI from 'pixi.js';
 import { MAP_WIDTH, MAP_HEIGHT, TerrainOp } from '@browserbond/shared';
+import { scorchDiscFor, SCORCH_BRIGHTNESS } from './scorch';
 
 /** Placeholder ground colour, used until maps are authored as PNGs. */
 export const TERRAIN_COLOR = 0x8b7355;
+
+/**
+ * Gray whose channel value equals SCORCH_BRIGHTNESS. The scorch pass fills its
+ * disc with this and multiplies it into the terrain, so a pixel's colour is
+ * scaled toward the brightness fraction and its alpha is left alone.
+ */
+const SCORCH_TINT = (() => {
+  const c = Math.round(SCORCH_BRIGHTNESS * 255);
+  return (c << 16) | (c << 8) | c;
+})();
 
 export class TerrainSurface {
   private renderer: PIXI.Renderer;
@@ -120,38 +131,72 @@ export class TerrainSurface {
     }
   }
 
-  /** Paint one run of same-kind ops in a single render pass. */
+  /** Paint one run of same-kind ops. */
   private paintRun(ops: TerrainOp[]): void {
     const g = this.scratch;
-    g.clear();
 
     if (ops[0].type === 'rect') {
+      g.clear();
       for (const op of ops) {
         if (op.type !== 'rect') continue;
         g.rect(op.x, op.y, op.width, op.height);
       }
       g.fill(TERRAIN_COLOR);
       g.blendMode = 'normal';
+      this.renderer.render({
+        container: this.paintRoot,
+        target: this.texture,
+        clear: false,
+      });
     } else {
+      // Scorch pass first: explosions darken a disc a little wider than the
+      // crater they are about to carve. The disc covers the crater too, and the
+      // erase below cuts the crater back out of it, leaving the burn as a ring.
+      //
+      // `multiply` scales a pixel's colour by the tint and — over SOLID terrain,
+      // which is the case the band is drawn onto — leaves its alpha alone, so
+      // the terrain darkens and the sky stays sky. KNOWN LIMITATION: Pixi's
+      // multiply drives an already-erased (transparent) pixel to opaque black,
+      // so a scorch disc overlapping an EARLIER crater reads as a black band.
+      // A custom blend (colour = dst·src, alpha = dst) fixes it if playtest
+      // minds; it was not worth a shader for a first pass.
+      let hasScorch = false;
+      g.clear();
+      for (const op of ops) {
+        if (op.type !== 'explosion') continue;
+        const disc = scorchDiscFor(op);
+        if (!disc) continue;
+        g.circle(disc.x, disc.y, disc.radius);
+        hasScorch = true;
+      }
+      if (hasScorch) {
+        g.fill({ color: SCORCH_TINT, alpha: 1 });
+        g.blendMode = 'multiply';
+        this.renderer.render({
+          container: this.paintRoot,
+          target: this.texture,
+          clear: false,
+        });
+      }
+
+      // Erase pass: the crater itself plus any collapsed lips. 'erase' maps to
+      // blendFunc(ZERO, ONE_MINUS_SRC_ALPHA): the destination is multiplied by
+      // (1 - srcAlpha), so an opaque disc drives colour AND alpha to zero.
+      g.clear();
       for (const op of ops) {
         // Both erasing kinds share this pass: 'explosion' carves a crater,
         // 'clear' removes a collapsed overhanging lip (see collapseLips).
         if (op.type === 'explosion') g.circle(op.x, op.y, op.radius);
         else if (op.type === 'clear') g.rect(op.x, op.y, op.width, op.height);
       }
-      // 'erase' maps to blendFunc(ZERO, ONE_MINUS_SRC_ALPHA): the destination
-      // is multiplied by (1 - srcAlpha), so an opaque disc drives colour AND
-      // alpha to zero. The colour we fill with is irrelevant — only its alpha
-      // matters — but it must be opaque for a full-strength erase.
       g.fill({ color: 0xffffff, alpha: 1 });
       g.blendMode = 'erase';
+      this.renderer.render({
+        container: this.paintRoot,
+        target: this.texture,
+        clear: false,
+      });
     }
-
-    this.renderer.render({
-      container: this.paintRoot,
-      target: this.texture,
-      clear: false,
-    });
 
     // Leave the scratch in a neutral state so a stray render can't erase.
     g.blendMode = 'normal';

@@ -10,8 +10,9 @@
  * so "grounded" is simply "the pixel at (x, y) is solid". Nothing in this
  * module sweeps a box against terrain.
  *
- * The box still exists — it is what the character is DRAWN as and what
- * projectiles are tested against (`pointInBody`) — but it is no longer what the
+ * The box still exists — it is what the character is DRAWN as, what
+ * projectiles are tested against (`pointInBody`) and what splash damage is
+ * measured to (`distanceToBody`) — but it is no longer what the
  * simulation moves. That distinction is the whole point of this module's
  * shape. A swept AABB needs a lookahead secant to tell a slope from a step,
  * a trailing-half-only ceiling probe so its shoulders do not catch on the face
@@ -61,7 +62,7 @@ export type SurfaceProbe =
 /** Convenience for callers that use the default map size. */
 export const DEFAULT_MAP_SIZE = { width: MAP_WIDTH, height: MAP_HEIGHT } as const;
 
-/** Half the drawn body's width; used only by `pointInBody`. */
+/** Half the drawn body's width; used only by the drawn-body queries below. */
 const HALF_WIDTH = PLAYER_WIDTH / 2;
 
 /**
@@ -296,6 +297,29 @@ export interface TiltedBody extends Body {
 }
 
 /**
+ * A world point expressed in the body's own frame: rotated by MINUS the chassis
+ * tilt about the contact point, which is the origin. In that frame the drawn
+ * body is the axis-aligned box `[-HALF_WIDTH, HALF_WIDTH] x [-PLAYER_HEIGHT, 0]`.
+ *
+ * Both the hit test and the splash distance go through here so there is exactly
+ * one definition of where the body IS. Duplicating these six lines is how the
+ * two silently disagree about a leaning character — the failure this whole
+ * module's oriented box exists to prevent.
+ */
+function toBodySpace(px: number, py: number, body: TiltedBody): { lx: number; ly: number } {
+  const tilt = body.tilt ?? 0;
+  const dx = px - body.x;
+  const dy = py - body.y;
+
+  // Rotate by -tilt into body space. Sin is negated rather than the angle,
+  // which is the same rotation with one fewer trig call.
+  const c = Math.cos(tilt);
+  const s = Math.sin(tilt);
+
+  return { lx: dx * c + dy * s, ly: -dx * s + dy * c };
+}
+
+/**
  * Is a point inside a character's DRAWN body?
  *
  * An ORIENTED box: `PLAYER_WIDTH` by `PLAYER_HEIGHT`, standing on `body.y`, and
@@ -326,18 +350,43 @@ export interface TiltedBody extends Body {
  * inside the ground — falls within it and hits.
  */
 export function pointInBody(px: number, py: number, body: TiltedBody): boolean {
-  const tilt = body.tilt ?? 0;
-  const dx = px - body.x;
-  const dy = py - body.y;
-
-  // Rotate by -tilt into body space. Sin is negated rather than the angle,
-  // which is the same rotation with one fewer trig call.
-  const c = Math.cos(tilt);
-  const s = Math.sin(tilt);
-  const lx = dx * c + dy * s;
-  const ly = -dx * s + dy * c;
+  const { lx, ly } = toBodySpace(px, py, body);
 
   return (
     lx >= -HALF_WIDTH && lx <= HALF_WIDTH && ly >= -PLAYER_HEIGHT && ly <= 0
   );
+}
+
+/**
+ * Distance in px from a point to the NEAREST point of the drawn body; 0 when
+ * the point is inside it.
+ *
+ * This is what splash damage must measure. `body.y` is the contact point — the
+ * FEET — so measuring centre-to-contact-point scores a blast level with the
+ * head as a whole body-height (36px) further away than it looks, and a shot
+ * that lands at head height does less damage than the identical shot at the
+ * feet. Worse, it disagreed with `pointInBody`: a projectile could be a DIRECT
+ * HIT on the head and still be scored, for splash purposes, as 36px away.
+ *
+ * It deliberately shares `toBodySpace` with `pointInBody` rather than
+ * re-deriving the transform, so the two answers come from ONE shape and cannot
+ * drift as the box or the tilt convention changes. The clamp below is exactly
+ * `pointInBody`'s bounds test with `min`/`max` in place of `>=`/`<=`; a point
+ * that passes that test clamps to itself and yields 0, which is what "inside
+ * the blast core" means.
+ *
+ * Distance is computed in BODY space and returned unconverted, which is legal
+ * because a rotation preserves distances — there is no need to rotate the
+ * closest point back into world space to measure it.
+ *
+ * This is GunBound's `CollisionBox.GetSquaredDistance`: closest point on the
+ * oriented box to the blast.
+ */
+export function distanceToBody(px: number, py: number, body: TiltedBody): number {
+  const { lx, ly } = toBodySpace(px, py, body);
+
+  const clampedX = Math.min(HALF_WIDTH, Math.max(-HALF_WIDTH, lx));
+  const clampedY = Math.min(0, Math.max(-PLAYER_HEIGHT, ly));
+
+  return Math.hypot(lx - clampedX, ly - clampedY);
 }

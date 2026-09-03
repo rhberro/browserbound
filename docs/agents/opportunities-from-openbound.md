@@ -229,7 +229,8 @@ integrated with the terrain mask. No change needed.
 
 ## Landed
 
-Fixed in the commit that introduced this document.
+Fixed on the point-contact branch. The three original items came with the
+commit that introduced this document; the rest are later tickets.
 
 **The projectile ceiling.** Ours was `proj.y < -50`, against GunBound's deliberate
 `ProjectilePlayableMapAreaYLimit = -300`. At `POWER_SCALE 0.3` and `GRAVITY 0.4` a shot's apex is
@@ -244,3 +245,27 @@ the boundary and, going out over the top, drew an explosion in open air. A miss 
 **The oriented hitbox.** `pointInBody` now leans with the chassis. See the amendment to ADR 0004 for
 why the original axis-aligned decision did not survive the move to point contact, and for the
 numbers: at 20° of tilt the drawn head sat 11.6px outside the level box.
+
+**Wind drifts each turn (#29).** Wind is no longer held for several rounds and
+then teleported; it is nudged every turn (magnitude clamped, angle wrapped) and
+re-rolled on its own cadence, so the shot you just took informs the next one.
+`WindManager` counts turns, never rounds.
+
+**Splash measures to the drawn body (#30).** `distanceToBody` shares the
+oriented-box transform with `pointInBody`, so a blast at head height and one at
+foot height score identically and a blast inside the body is distance zero.
+
+**Per-weapon mass and wind influence (#31).** Each weapon declares a `mass`
+(launch-speed divisor) and a `windInfluence` (wind-drift scale) beside its other
+fields; both reach `PhysicsAdapter` as parameters, so it never learns what a
+weapon is.
+
+**Blast scorch ring (#34).** Craters darken a thin band just outside the erased
+radius. Client-side only, derived from the op log, so a late joiner's battlefield
+matches and solidity is untouched.
+
+**Impact debris (#33).** Explosions throw debris scaled to the terrain pixels
+they actually removed, drawn by a minimal pooled particle system.
+
+**Aim acceleration (#32).** Held aim controls ramp up to a floor instead of
+repeating at a fixed rate.

@@ -6,7 +6,7 @@ import {
   PROJECTILE_CEILING, PROJECTILE_BOUNDS_MARGIN,
   PROJECTILE_MAX_LIFETIME_FRAMES, RECONNECT_WINDOW_SECONDS,
   walkStep, isSolid, isGrounded, groundDistance, ejectUp, computeTilt, Body,
-  pointInBody,
+  pointInBody, distanceToBody,
   worldFiringAngle, clampAimDeg, degToRad,
   Player, RoomState, Projectile,
 } from '@browserbond/shared';
@@ -73,8 +73,6 @@ export class GameRoom extends Room {
   private physics!: PhysicsAdapter;
   private windManager!: WindManager;
   private validator!: MessageValidationAdapter;
-  private roundsCompleted: number = 0;
-  private currentWindDuration: number = 0;
   private lastPlayerId: string = '';
   /** Players already told they are against a wall, to debounce the cue. */
   private blockedNotified: Set<string> = new Set();
@@ -148,20 +146,10 @@ export class GameRoom extends Room {
       windIntegration: WIND_INTEGRATION,
     });
     this.validator = new MessageValidationAdapter();
-    this.windManager = new WindManager({
-      durationMin: 5,
-      durationMax: 10,
-      magnitudeMin: 0.1,
-      magnitudeMax: 0.5,
-    });
-    // Initialize wind duration (in rounds, not frames)
-    const wind = this.windManager.getCurrentWind();
-    this.currentWindDuration = wind.framesRemaining;
-    this.roundsCompleted = 0;
-
-    // Set initial wind state
-    this.state.windSpeed = wind.magnitude * 100;
-    this.state.windDirection = wind.angle;
+    // Bounds, drift and re-roll cadence all come from the shared wind
+    // constants; nothing about the wind is configured at the call site.
+    this.windManager = new WindManager();
+    this.publishWind();
 
     // Physics loop - update every 16ms. `setSimulationInterval` in 0.18 is a
     // deprecated alias for this.
@@ -223,7 +211,7 @@ export class GameRoom extends Room {
       this.blockedNotified.delete(client.sessionId);
 
       for (const spec of projectileSpecs) {
-        const vel = this.physics.createProjectile(spec.angle, data.power);
+        const vel = this.physics.createProjectile(spec.angle, data.power, weapon.mass);
         const proj = makeProjectile(
           player.x,
           player.y,
@@ -359,7 +347,10 @@ export class GameRoom extends Room {
     this.matchStarted = this.state.players.size >= 2;
     this.state.matchPhase = 'playing';
     this.state.winnerId = '';
-    this.roundsCompleted = 0;
+    // A rematch gets fresh weather rather than inheriting the wind the last
+    // match happened to drift into.
+    this.windManager.generateNewWind();
+    this.publishWind();
 
     this.broadcast('terrainSync', { mapId: this.map.id, ops: this.terrainOps });
 
@@ -417,16 +408,17 @@ export class GameRoom extends Room {
       return true; // Mantém na fila
     });
 
-    // Get current wind (changes only at end of rounds, not every frame)
+    // Get current wind (changes at the end of each turn, not every frame)
     const wind: Wind = this.windManager.getCurrentWind();
 
-    // Update wind state - Colyseus detects changes automatically
-    this.state.windSpeed = wind.magnitude * 100;
-    this.state.windDirection = wind.angle;
-
-    // Update projectiles using PhysicsAdapter
+    // Update projectiles using PhysicsAdapter. Wind influence is per weapon, so
+    // each projectile's drift is scaled by what fired it.
     const active: Projectile[] = Array.from(this.state.projectiles.values());
-    this.physics.updateAllProjectiles(active, wind);
+    this.physics.updateAllProjectiles(
+      active,
+      wind,
+      (proj) => getWeapon(proj.weaponType).windInfluence
+    );
 
     // Check collisions
     const projectilesToRemove: string[] = [];
@@ -515,9 +507,20 @@ export class GameRoom extends Room {
           // Skip the firer
           if (playerId === proj.firedBy) continue;
 
+          // Knockback DIRECTION only, and deliberately still from the contact
+          // point: which way a blast shoves a character is a question about
+          // where it stands, not about the nearest corner of its sprite.
           const dx = player.x - collision.x;
           const dy = player.y - collision.y;
-          const dist = Math.hypot(dx, dy);
+          // Distance to the DRAWN BODY, not to the contact point. `player.y` is
+          // the feet, so hypot() to it scored a blast level with the head as a
+          // whole body-height (36px) further away than it looked, and made an
+          // identical shot hurt less the higher up the character it landed. It
+          // also contradicted the direct-hit test: a projectile could be inside
+          // `pointInBody` and still be treated as 36px of falloff away. Both
+          // now read the same oriented box, tilt included. Zero inside it, so a
+          // blast in the body always takes the saturated core of the curve.
+          const dist = distanceToBody(collision.x, collision.y, player);
 
           if (dist > range) continue; // Outside splash range
 
@@ -866,8 +869,19 @@ export class GameRoom extends Room {
   }
 
   /**
-   * Pass the turn to the next surviving player, advancing the round (and the
-   * wind) when it wraps back to the first.
+   * Mirror the wind into synchronized state. That IS the notification: the wind
+   * dial reads these two fields, so a broadcast alongside them would be a
+   * second source of truth that the next state patch immediately overwrites.
+   */
+  private publishWind() {
+    const wind = this.windManager.getCurrentWind();
+    this.state.windSpeed = wind.magnitude * 100;
+    this.state.windDirection = wind.angle;
+  }
+
+  /**
+   * Pass the turn to the next surviving player, and drift the wind because a
+   * turn ended.
    */
   private advanceTurn() {
     const playerIds = Array.from(this.state.players.keys());
@@ -881,20 +895,12 @@ export class GameRoom extends Room {
     const nextIndex = (currentIndex + 1) % playerIds.length;
     this.beginTurn(playerIds[nextIndex]);
 
-    if (nextIndex !== 0) return;
-
-    this.roundsCompleted++;
-    if (this.roundsCompleted < this.currentWindDuration) return;
-
-    this.windManager.generateNewWind();
-    const newWind = this.windManager.getCurrentWind();
-    this.currentWindDuration = newWind.framesRemaining;
-    this.roundsCompleted = 0;
-    this.state.windSpeed = newWind.magnitude * 100;
-    this.state.windDirection = newWind.angle;
-    // No windChanged broadcast. Wind is synchronized state, so the two writes
-    // above already tell every client; a message repeating them was a second
-    // source of truth that the next state patch immediately overwrote.
+    // Every turn, unconditionally. The wind used to change only when this
+    // rotation wrapped back to index 0 — a "round" — which made the weather a
+    // hostage of the turn-order implementation; ticket #35 replaces the
+    // rotation with a delay queue and no wrap exists to hang it on.
+    this.windManager.advanceTurn();
+    this.publishWind();
   }
 
   /**

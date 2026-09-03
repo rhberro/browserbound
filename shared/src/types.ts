@@ -197,3 +197,56 @@ export const TILT_WINDOW_Y = 25;
 /** Aim limits, in degrees, measured RELATIVE TO THE CHASSIS. See ADR 0003. */
 export const AIM_MIN_DEG = -20;
 export const AIM_MAX_DEG = 90;
+
+// ---------------------------------------------------------------------------
+// Wind.
+// Wind DRIFTS: it is nudged a little at the end of every turn and only
+// occasionally re-rolled outright. A wind that teleports to a fresh random pair
+// makes the shot you just took worthless as information, which punishes the
+// exact skill the mechanic exists to reward. Numbers are OpenBound's
+// `MatchMetadata.DisturbWind` translated into our units — see
+// docs/agents/opportunities-from-openbound.md, Tier 1 item 2.
+// ---------------------------------------------------------------------------
+
+/** Weakest wind the game will roll. Also the floor drift is clamped against. */
+export const WIND_MAGNITUDE_MIN = 0.1;
+/** Strongest wind the game will roll. Also the ceiling drift is clamped against. */
+export const WIND_MAGNITUDE_MAX = 0.5;
+
+/**
+ * Probability that a turn ending disturbs the wind at all. At 0.5 the dial
+ * moves about every other turn, which reads as weather rather than as a slider
+ * being dragged. OpenBound's `WeatherWindAngleDisturbanceChance`. TUNE.
+ */
+export const WIND_DRIFT_CHANCE = 0.5;
+
+/**
+ * Largest magnitude change a single turn may make, in wind units. 0.024 is 6%
+ * of the 0.1-0.5 range, matching OpenBound's +/-2 out of its 0-35 force scale.
+ *
+ * Sized to be readable, not decisive: at WIND_INTEGRATION the whole range only
+ * spans 0.035-0.175 px/frame^2 of acceleration, so one turn's worst case moves
+ * a full-map shot by a few pixels — an adjustment, not a re-aim. TUNE.
+ */
+export const WIND_DRIFT_MAGNITUDE = 0.024;
+
+/**
+ * Largest direction change a single turn may make, in radians (3 degrees).
+ * OpenBound's `WeatherWindAngleDisturbance`. Small enough that the wind dial
+ * stays where the player last read it, large enough that a few unattended
+ * turns visibly move it. TUNE.
+ */
+export const WIND_DRIFT_ANGLE = Math.PI / 60;
+
+/**
+ * How many turns a wind survives before it is re-rolled outright, drawn
+ * uniformly from this range.
+ *
+ * Drift alone is a random walk, and a random walk clamped at a bound will sit
+ * against it: without the re-roll a match can spend its second half in one
+ * corner of the wind space. 10-20 turns is the old 5-10 ROUNDS at two players,
+ * kept deliberately — the pacing was never the complaint — but counted in the
+ * unit that survives ticket #35 removing rounds entirely. TUNE.
+ */
+export const WIND_REROLL_TURNS_MIN = 10;
+export const WIND_REROLL_TURNS_MAX = 20;

@@ -60,6 +60,22 @@ export interface WeaponSpec {
    * See knockbackImpulse().
    */
   knockbackScale: number;
+
+  /**
+   * Mass divides launch speed (see PhysicsAdapter.createProjectile), so a
+   * heavier shell needs more power for the same range and a lighter one carries
+   * further for free. 1 is the reference mass and leaves the arc unchanged.
+   * TUNE.
+   */
+  mass: number;
+
+  /**
+   * Scales how strongly wind bends this projectile (see
+   * PhysicsAdapter.updateAllProjectiles). 1 is the reference; a light shell
+   * shrugs wind off less, so values above 1 drift more, and 0 is wind-immune.
+   * TUNE.
+   */
+  windInfluence: number;
 }
 
 export const WEAPONS: Record<number, WeaponSpec> = {
@@ -90,6 +106,11 @@ export const WEAPONS: Record<number, WeaponSpec> = {
     // stops against walls, and pushes the target off a ledge rather than
     // launching it. TUNE via KNOCKBACK_SHOVE_SCALE.
     knockbackScale: 0.35,
+    // The reference shell: mass 1 leaves the arc untouched, wind 1 leaves the
+    // existing drift untouched. Heavier and less wind-sensitive than the pellet
+    // weapons, as the "heavy single shot" name implies.
+    mass: 1.0,
+    windInfluence: 1.0,
   },
   2: {
     id: 2,
@@ -121,6 +142,10 @@ export const WEAPONS: Record<number, WeaponSpec> = {
     // Higher per-damage scale so a single 16-dmg projectile visibly shoves
     // (16 * 0.40 = 6.4, so ~6px); three stacked hits shove ~19px in total.
     knockbackScale: 0.40,
+    // Lighter pellets than Normal: they carry a little further and drift a
+    // little more in wind, which suits a tight-spread precision burst. TUNE.
+    mass: 0.95,
+    windInfluence: 1.2,
   },
   3: {
     id: 3,
@@ -147,6 +172,10 @@ export const WEAPONS: Record<number, WeaponSpec> = {
     maxDamage: 18,
     // 18 * 0.40 = 7.2 per pellet; ~10.8 if all three connect at similar ranges.
     knockbackScale: 0.40,
+    // Lightest pellets of the three: the furthest carry, but also the most wind
+    // drift — which the wide spread already punishes at range. TUNE.
+    mass: 0.9,
+    windInfluence: 1.4,
   },
 };
 
