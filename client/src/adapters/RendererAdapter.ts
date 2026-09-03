@@ -34,9 +34,6 @@ const HEALTH_BAR_GAP = 8;
 /** Radius the impact flash reaches at the end of its animation, in pixels. */
 const EXPLOSION_MAX_RADIUS = 40;
 
-/** Length of the aim gauge, measured from the muzzle outward. */
-const AIM_LENGTH = 100;
-
 /**
  * How far out from the character the aim visuals start, measured from the feet
  * along the firing direction.
@@ -149,7 +146,6 @@ export class RendererAdapter {
   private lastProjectileFrameTime: number = performance.now();
   private lastFrameTime: number = performance.now();
   private localPlayerId: string | null = null;
-  private aimLine: PIXI.Graphics | null = null;
   private projectileGraphicsMap: Map<string, PIXI.Graphics> = new Map();
   private explosionGraphics: PIXI.Graphics | null = null;
   private explosionDuration: number = 500;
@@ -199,8 +195,6 @@ export class RendererAdapter {
     for (const explosion of this.deathExplosions) explosion.graphics.destroy();
     this.deathExplosions = [];
 
-    this.aimLine?.destroy();
-    this.aimLine = null;
     this.explosionGraphics?.destroy();
     this.explosionGraphics = null;
     this.particles.destroy();
@@ -474,73 +468,6 @@ export class RendererAdapter {
     const aimAngle =
       isLocal && aimState ? degToRad(aimState.angleDeg) : player.aimAngle;
     return worldFiringAngle({ tilt: player.tilt, aimAngle, facing: player.facing || 1 });
-  }
-
-  /**
-   * Render the aim line.
-   *
-   * Drawn throughout aiming, not only while the shot is charging. ADR 0003
-   * records that the aim line is the sole world-frame feedback in the game —
-   * the HUD number is chassis-relative and cannot substitute — so hiding it
-   * during the aiming phase leaves the player blind for exactly the part of
-   * the flow where they are choosing a direction.
-   */
-  renderAimLine(myPlayer: PlayerView | null, aimState: AimState): void {
-    if (myPlayer && this.localPlayerId) {
-      // Reused, not reallocated. The line is now drawn on every frame of
-      // aiming rather than only while charging, so allocating a fresh
-      // Graphics per frame here would leak in earnest. #22 does the same for
-      // the rest of this class.
-      if (!this.aimLine) {
-        this.aimLine = new PIXI.Graphics();
-        this.layers.aim.addChild(this.aimLine);
-      }
-      this.aimLine.clear();
-
-      const worldAngle = this.aimDirection(this.localPlayerId, myPlayer, aimState);
-
-      // Anchor to the rendered position, so the gauge follows the sprite rather
-      // than the raw server position it is smoothing toward.
-      const origin =
-        (this.localPlayerId ? this.motion.getRendered(this.localPlayerId) : null) ??
-        { x: myPlayer.x, y: myPlayer.y };
-
-      // The gauge is translated out along the firing direction rather than
-      // starting at the body centre, leaving the character visible under it —
-      // the whole line used to be drawn through the middle of the sprite. It is
-      // moved, not lengthened: the far end sits AIM_LENGTH from the muzzle, so
-      // a full power bar is the same length it always was and still reads as
-      // the same power.
-      //
-      // Offsetting along the firing direction is what keeps this correct on a
-      // slope and when facing left. `worldAngle` has already been through the
-      // shared aim transform, which is the one place the chassis tilt and the
-      // facing mirror are composed in the right order; a screen-horizontal
-      // offset would sit inside the sprite on any incline.
-      const cos = Math.cos(worldAngle);
-      const sin = Math.sin(worldAngle);
-      const muzzleX = origin.x + cos * AIM_MUZZLE_OFFSET;
-      const muzzleY = origin.y - sin * AIM_MUZZLE_OFFSET;
-
-      // Full aim line (white)
-      const endX = muzzleX + cos * AIM_LENGTH;
-      const endY = muzzleY - sin * AIM_LENGTH;
-      this.aimLine.moveTo(muzzleX, muzzleY);
-      this.aimLine.lineTo(endX, endY);
-      this.aimLine.stroke({ width: 3, color: 0xffffff });
-
-      // Power line (green, shorter)
-      const powerLength = (aimState.power / 100) * AIM_LENGTH;
-      const powerEndX = muzzleX + cos * powerLength;
-      const powerEndY = muzzleY - sin * powerLength;
-      this.aimLine.moveTo(muzzleX, muzzleY);
-      this.aimLine.lineTo(powerEndX, powerEndY);
-      this.aimLine.stroke({ width: 5, color: 0x00ff00 });
-    } else if (this.aimLine) {
-      this.layers.aim.removeChild(this.aimLine);
-      this.aimLine.destroy();
-      this.aimLine = null;
-    }
   }
 
   /**

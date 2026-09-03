@@ -140,16 +140,17 @@ export class TerrainSurface {
 
     // A mask object is EXCLUDED from its parent's normal render in Pixi 8, so
     // the terrain sprite itself can never be the mask — it would stop being
-    // drawn. The mask is a separate sprite of the SAME terrain texture, kept
-    // out of the display tree, so the terrain sprite renders and the scorch is
-    // still clipped to terrain.
+    // drawn. The mask is a separate sprite of the SAME terrain texture, added
+    // to the tree only so it is rendered AS the mask (it is excluded from the
+    // parent's child pass, so it does not draw a duplicate terrain). The terrain
+    // sprite renders, and the scorch is clipped to terrain.
     this.maskSprite = new PIXI.Sprite(this.texture);
     this.maskSprite.x = 0;
     this.maskSprite.y = 0;
     this.scorchSprite.mask = this.maskSprite;
 
     this.root = new PIXI.Container();
-    this.root.addChild(this.sprite, this.scorchSprite);
+    this.root.addChild(this.sprite, this.scorchSprite, this.maskSprite);
   }
 
   /** The display object to place in the scene where terrain belongs. */

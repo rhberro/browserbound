@@ -141,14 +141,6 @@ export class GameScene {
   }
 
   render() {
-    const aimState = this.inputAdapter.getAimState();
-    const myPlayer = this.gameState.getMyPlayer();
-
-    // The aim line is the only world-frame feedback the player gets (ADR
-    // 0003), so it is drawn for the whole of your turn — not just while the
-    // shot is charging. Nobody else's aim is your business.
-    this.rendererAdapter.renderAimLine(this.gameState.isMyTurn() ? myPlayer : null, aimState);
-
     // Render explosion animation
     this.rendererAdapter.renderExplosion(this.gameState.collision);
 
