@@ -7,7 +7,6 @@ export type TerrainOp =
 export const MAP_WIDTH = 2000;
 export const MAP_HEIGHT = 1200;
 export const DEFAULT_CRATER_RADIUS = 50;
-export const PLAYER_RADIUS = 20;
 
 export function applyOpToBitmap(
   bitmap: Uint8Array,

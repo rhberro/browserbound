@@ -9,6 +9,7 @@ import {
   computeTilt,
   settle,
   airborneHorizontal,
+  pointInBody,
   Body,
 } from '../characterPhysics';
 import {
@@ -399,5 +400,51 @@ describe('airborneHorizontal', () => {
     const vx = airborneHorizontal(mask, W, H, b, 0);
     expect(b.x).toBe(100); // Did not move
     expect(vx).toBe(0); // Velocity remains zero
+  });
+});
+
+describe('pointInBody', () => {
+  // body.y is the FEET, so the box spans [y - PLAYER_HEIGHT, y] vertically and
+  // is centred on x. At 24x36 with feet at (100, 100) that is
+  // x in [88, 112], y in [64, 100].
+  const feet = { x: 100, y: 100 };
+
+  it('registers a hit at head height', () => {
+    // The defect this replaces: a circle of radius 20 centred on the feet does
+    // not reach the head, so a shot that visually struck the character missed.
+    expect(pointInBody(100, 66, feet)).toBe(true);
+  });
+
+  it('registers a hit at the centre of mass', () => {
+    expect(pointInBody(100, 82, feet)).toBe(true);
+  });
+
+  it('does not register below the feet, inside the terrain', () => {
+    // The same circle DID reach here, so a shot buried in the ground under a
+    // character counted as a hit.
+    expect(pointInBody(100, 110, feet)).toBe(false);
+  });
+
+  it('does not register above the head', () => {
+    expect(pointInBody(100, 63, feet)).toBe(false);
+  });
+
+  it('registers on every edge of the box', () => {
+    expect(pointInBody(88, 100, feet)).toBe(true);
+    expect(pointInBody(112, 100, feet)).toBe(true);
+    expect(pointInBody(88, 64, feet)).toBe(true);
+    expect(pointInBody(112, 64, feet)).toBe(true);
+  });
+
+  it('does not register just outside either side', () => {
+    expect(pointInBody(87.9, 82, feet)).toBe(false);
+    expect(pointInBody(112.1, 82, feet)).toBe(false);
+  });
+
+  it('matches the dimensions the physics simulates', () => {
+    // Guards against the box and the constants drifting apart.
+    expect(pointInBody(feet.x - PLAYER_WIDTH / 2, feet.y, feet)).toBe(true);
+    expect(pointInBody(feet.x, feet.y - PLAYER_HEIGHT, feet)).toBe(true);
+    expect(pointInBody(feet.x, feet.y - PLAYER_HEIGHT - 0.1, feet)).toBe(false);
   });
 });

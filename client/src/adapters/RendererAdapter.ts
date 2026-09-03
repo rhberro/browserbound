@@ -10,11 +10,23 @@
  */
 
 import * as PIXI from 'pixi.js';
-import { TerrainOp, PlayerView, worldFiringAngle, degToRad } from '@browserbond/shared';
+import {
+  TerrainOp,
+  PlayerView,
+  worldFiringAngle,
+  degToRad,
+  PLAYER_WIDTH,
+  PLAYER_HEIGHT,
+} from '@browserbond/shared';
 import type { GameState } from '../gameState';
 import { TerrainSurface } from '../rendering/TerrainSurface';
 import { PlayerMotion } from '../rendering/PlayerMotion';
 import type { AimState } from './InputAdapter';
+
+/** Health bar geometry, in pixels, measured from the top of the body. */
+const HEALTH_BAR_WIDTH = 40;
+const HEALTH_BAR_HEIGHT = 6;
+const HEALTH_BAR_GAP = 8;
 
 interface DeathExplosion {
   graphics: PIXI.Graphics;
@@ -28,6 +40,8 @@ interface DeathExplosion {
 export class RendererAdapter {
   private container: PIXI.Container;
   private playerSprites: Map<string, PIXI.Container> = new Map();
+  /** Last health each bar was drawn at, so unchanged bars are not rebuilt. */
+  private lastHealth: Map<string, number> = new Map();
   private angleIndicators: Map<string, PIXI.Graphics> = new Map();
   private terrain: TerrainSurface;
   private motion: PlayerMotion = new PlayerMotion();
@@ -86,7 +100,9 @@ export class RendererAdapter {
     for (const [playerId, sprite] of this.playerSprites) {
       if (!gameState.players.has(playerId)) {
         this.container.removeChild(sprite);
+        sprite.destroy({ children: true });
         this.playerSprites.delete(playerId);
+        this.lastHealth.delete(playerId);
         this.motion.remove(playerId);
 
         const angleInd = this.angleIndicators.get(playerId);
@@ -119,16 +135,14 @@ export class RendererAdapter {
       // someone thinking and someone whose connection dropped.
       sprite.alpha = player.connected === false ? 0.35 + 0.25 * Math.sin(now / 200) : 1;
 
-      // Update health bar
-      const healthBar = sprite.getChildByName('healthBar') as PIXI.Graphics | undefined;
-      if (healthBar) {
-        const healthPercent = Math.max(0, player.health / 100);
-        healthBar.clear();
-        healthBar.rect(-25, -30, 50 * healthPercent, 8);
-        healthBar.fill(
-          healthPercent > 0.5 ? 0x00ff00 : healthPercent > 0.25 ? 0xffff00 : 0xff0000
-        );
-      }
+      // ADR 0003 rejected cosmetic tilt in the other direction too: a chassis
+      // that does not visibly lean while the shot obeys the slope is just as
+      // much a lie as a shot that ignores a visible lean. Only the chassis
+      // rotates — the health bars stay level.
+      const chassis = sprite.getChildByName('chassis') as PIXI.Graphics | null;
+      if (chassis) chassis.rotation = player.tilt;
+
+      this.updateHealthBar(playerId, sprite, player.health);
 
       // Draw angle indicator for current player
       this.updateAngleIndicator(playerId, player, gameState, aimState);
@@ -142,25 +156,33 @@ export class RendererAdapter {
     const container = new PIXI.Container();
     container.name = `player_${playerId}`;
 
-    // Player circle
-    const circle = new PIXI.Graphics();
-    circle.circle(0, 0, 20);
-    circle.fill(playerId === gameState.getRoomSessionId() ? 0xff0000 : 0x0000ff);
-    container.addChild(circle);
+    // The chassis, drawn as the body the physics actually simulates: the
+    // container's origin is the FEET, matching player.y, so the box rises from
+    // y=0 to y=-PLAYER_HEIGHT and is centred on x. It used to be a circle of
+    // radius 20 centred on the feet — half of it below ground, wider than the
+    // real body, and with the health bar buried inside it.
+    const chassis = new PIXI.Graphics();
+    chassis.rect(-PLAYER_WIDTH / 2, -PLAYER_HEIGHT, PLAYER_WIDTH, PLAYER_HEIGHT);
+    chassis.fill(playerId === gameState.getRoomSessionId() ? 0xff0000 : 0x0000ff);
+    chassis.name = 'chassis';
+    container.addChild(chassis);
 
-    // Health bar background
+    // Health bars ride ABOVE the body and outside the rotating chassis, so
+    // they stay level and readable however far the character leans.
+    const bars = new PIXI.Container();
+    bars.name = 'healthBars';
+    bars.y = -PLAYER_HEIGHT - HEALTH_BAR_GAP;
+
     const healthBg = new PIXI.Graphics();
-    healthBg.rect(-25, -30, 50, 8);
+    healthBg.rect(-HEALTH_BAR_WIDTH / 2, -HEALTH_BAR_HEIGHT, HEALTH_BAR_WIDTH, HEALTH_BAR_HEIGHT);
     healthBg.fill(0x333333);
-    container.addChild(healthBg);
+    bars.addChild(healthBg);
 
-    // Health bar (green)
     const health = new PIXI.Graphics();
-    health.rect(-25, -30, 50, 8);
-    health.fill(0x00ff00);
     health.name = 'healthBar';
-    container.addChild(health);
+    bars.addChild(health);
 
+    container.addChild(bars);
     this.container.addChild(container);
     return container;
   }
@@ -198,6 +220,33 @@ export class RendererAdapter {
         this.angleIndicators.delete(playerId);
       }
     }
+  }
+
+  /**
+   * Redraw a health bar, but only when the health it shows has actually
+   * changed.
+   *
+   * Health changes a handful of times a match; the bar was being cleared and
+   * re-triangulated 60 times a second regardless. PixiJS names rebuilding
+   * unchanged geometry explicitly as the thing not to do.
+   */
+  private updateHealthBar(playerId: string, sprite: PIXI.Container, health: number): void {
+    if (this.lastHealth.get(playerId) === health) return;
+    this.lastHealth.set(playerId, health);
+
+    const bars = sprite.getChildByName('healthBars') as PIXI.Container | null;
+    const bar = bars?.getChildByName('healthBar') as PIXI.Graphics | null;
+    if (!bar) return;
+
+    const fraction = Math.max(0, Math.min(1, health / 100));
+    bar.clear();
+    bar.rect(
+      -HEALTH_BAR_WIDTH / 2,
+      -HEALTH_BAR_HEIGHT,
+      HEALTH_BAR_WIDTH * fraction,
+      HEALTH_BAR_HEIGHT
+    );
+    bar.fill(fraction > 0.5 ? 0x00ff00 : fraction > 0.25 ? 0xffff00 : 0xff0000);
   }
 
   /**

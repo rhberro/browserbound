@@ -5,6 +5,7 @@ import {
   MOVE_BUDGET, WALK_SPEED, TURN_TIME_MS, TERMINAL_VELOCITY,
   PROJECTILE_MAX_LIFETIME_FRAMES, RECONNECT_WINDOW_SECONDS,
   walkStep, settle, testCollisionY, pushOutOfWall, airborneHorizontal, computeTilt, Body,
+  pointInBody,
   worldFiringAngle, clampAimDeg, degToRad,
   Player, RoomState,
 } from '@browserbond/shared';
@@ -290,7 +291,8 @@ export class GameRoom extends Room<RoomState> {
 
         for (const [playerId, player] of this.state.players) {
           if (playerId === proj.firedBy) continue;
-          if (Math.hypot(sx - player.x, sy - player.y) < 20) {
+          // The simulated body, not a circle at its feet. See pointInBody.
+          if (pointInBody(sx, sy, player)) {
             collision = { type: 'player' as const, playerId, x: sx, y: sy };
             break;
           }

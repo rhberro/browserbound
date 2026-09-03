@@ -383,3 +383,26 @@ export function airborneHorizontal(
 
   return vx;
 }
+
+/**
+ * Is a point inside a character's body?
+ *
+ * The body is the AABB the physics actually simulates: `PLAYER_WIDTH` wide,
+ * centred horizontally on `body.x`, and `PLAYER_HEIGHT` tall standing ON
+ * `body.y` — so it spans `[y - PLAYER_HEIGHT, y]`. `body.y` is the FEET.
+ *
+ * Projectiles used to be tested against a circle of radius 20 centred on the
+ * feet, which is wrong at both ends: a shot at head height falls outside it and
+ * misses a character it visually struck, while a shot passing below the feet —
+ * inside the ground — falls within it and hits. Axis-aligned, deliberately:
+ * this must agree with the body `testCollisionY` and `walkStep` move, and those
+ * are axis-aligned regardless of how the chassis is drawn.
+ */
+export function pointInBody(px: number, py: number, body: Body): boolean {
+  return (
+    px >= body.x - HALF_WIDTH &&
+    px <= body.x + HALF_WIDTH &&
+    py >= body.y - PLAYER_HEIGHT &&
+    py <= body.y
+  );
+}
