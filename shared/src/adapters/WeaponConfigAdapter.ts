@@ -39,19 +39,19 @@ export interface WeaponSpec {
   craterRadius: number;
 
   /**
-   * Blast falloff scale (px). NOT the edge of the blast — the name is inherited
-   * and is now misleading. This is the distance at which a target takes ~50% of
-   * maxDamage. Damage decays to exactly zero at splashRange(splashRadius), i.e.
-   * `2 * splashRadius + 4`, which is a little over twice this value.
+   * Blast falloff scale (px). The distance at which a target takes exactly
+   * `maxDamage` — the reference point of the inverse-distance curve. Damage
+   * reaches zero at splashRange(splashRadius) = `2 * splashRadius + 4`.
    *
    * Callers deciding which characters to test MUST use splashRange(), not this.
    */
   splashRadius: number;
 
   /**
-   * Peak damage of a single projectile — what splashDamage() returns in the
-   * saturated core of the blast. Fully independent of splashRadius: splashRadius
-   * sets how far the damage reaches, maxDamage sets how hard it lands.
+   * Damage at distance `splashRadius`, the reference point the inverse-distance
+   * curve is normalised to pass through. A dead-centre hit is clamped to
+   * `SPLASH_MAX_MULTIPLIER` × this, so this is NOT the peak — it is the value a
+   * target at the falloff scale takes.
    */
   maxDamage: number;
 
@@ -76,6 +76,13 @@ export interface WeaponSpec {
    * TUNE.
    */
   windInfluence: number;
+
+  /**
+   * Delay cost added to the firer's total when this weapon is fired. Cheaper
+   * weapons buy tempo: whoever has the lowest total acts next, so firing a
+   * cheap shot can earn two turns in a row (issue #35). TUNE.
+   */
+  delayCost: number;
 }
 
 export const WEAPONS: Record<number, WeaponSpec> = {
@@ -94,12 +101,12 @@ export const WEAPONS: Record<number, WeaponSpec> = {
     description: 'Single projectile, standard ballistics',
     // Reference weapon: one heavy shot. Crater 50 matches the value the game has
     // always hardcoded, so terrain behaviour is unchanged for the baseline weapon.
-    // 50 damage in the core -> two clean hits to kill from full health.
-    // Splash 40 means 25 damage at 40px and zero at 84px; damage therefore reaches
-    // a bit beyond the crater rim, which is what makes "close" meaningful.
+    // maxDamage 25 is the damage AT splashRadius 40; a direct hit is clamped to
+    // 2× = 50 — two clean hits to kill from full health — and damage reaches
+    // zero at 84px, a little beyond the crater rim.
     craterRadius: 50,
     splashRadius: 40,
-    maxDamage: 50,
+    maxDamage: 25,
     // 50 dmg * 0.35 = ~17px of SIDEWAYS shove on a direct hit. Only the
     // horizontal component is spent — since ADR 0004 nothing moves a character
     // upward — and it is spent as a walked displacement, so it follows slopes,
@@ -111,6 +118,9 @@ export const WEAPONS: Record<number, WeaponSpec> = {
     // weapons, as the "heavy single shot" name implies.
     mass: 1.0,
     windInfluence: 1.0,
+    // The baseline tempo. Cheaper than the pellet weapons, so the reliable
+    // single shot also comes back around sooner. TUNE.
+    delayCost: 770,
   },
   2: {
     id: 2,
@@ -129,16 +139,16 @@ export const WEAPONS: Record<number, WeaponSpec> = {
     description: '3 projectiles in quick succession with ±0.2° random spread',
     // Three staggered projectiles on a ±0.2° spread land almost on top of each
     // other, so per-projectile numbers must be well under a third of Normal or
-    // Burst becomes a strictly better Normal. 16 dmg x 3 = 48 if all three
-    // converge — just under Normal's 50, and only at short range where the spread
-    // has not opened up.
+    // Burst becomes a strictly better Normal. 8 dmg at R x 3 = 24; a point-blank
+    // direct hit is 2× = 16 each — 48 if all three converge, just under Normal's
+    // 50, and only at short range where the spread has not opened up.
     // Splash 16 (zero at 36px) keeps each pellet tight: Burst is a precision
     // weapon, so it must not inherit Normal's forgiving 84px reach.
     // Crater 20 x3 overlapping digs roughly a Normal-sized hole, and each
     // individual rim stays shallow enough that a near miss does not wall someone in.
     craterRadius: 20,
     splashRadius: 16,
-    maxDamage: 16,
+    maxDamage: 8,
     // Higher per-damage scale so a single 16-dmg projectile visibly shoves
     // (16 * 0.40 = 6.4, so ~6px); three stacked hits shove ~19px in total.
     knockbackScale: 0.40,
@@ -146,6 +156,9 @@ export const WEAPONS: Record<number, WeaponSpec> = {
     // little more in wind, which suits a tight-spread precision burst. TUNE.
     mass: 0.95,
     windInfluence: 1.2,
+    // A touch more tempo than Normal to pay for the tighter precision ceiling.
+    // TUNE.
+    delayCost: 830,
   },
   3: {
     id: 3,
@@ -163,19 +176,22 @@ export const WEAPONS: Record<number, WeaponSpec> = {
     description: '3 projectiles spread ±1°, fires simultaneously',
     // Wider fixed spread than Burst, fired simultaneously: at range the three
     // pellets separate, so the all-three-land case is a close-range reward.
-    // Slightly higher per-pellet damage than Burst to pay for that unreliability,
-    // but trimmed to 18 (from a first pass at 20) because splash 20 reaches 44px
-    // — wide enough that dispersed pellets each still clip a target for partial
-    // damage. 54 point blank, ~30 at a range where the pattern has opened up.
+    // Slightly higher per-pellet damage than Burst to pay for that unreliability:
+    // 9 at R (a direct hit is 2× = 18), and splash 20 reaches 44px — wide enough
+    // that dispersed pellets each still clip a target for partial damage.
+    // 54 point blank, ~30 at a range where the pattern has opened up.
     craterRadius: 25,
     splashRadius: 20,
-    maxDamage: 18,
+    maxDamage: 9,
     // 18 * 0.40 = 7.2 per pellet; ~10.8 if all three connect at similar ranges.
     knockbackScale: 0.40,
     // Lightest pellets of the three: the furthest carry, but also the most wind
     // drift — which the wide spread already punishes at range. TUNE.
     mass: 0.9,
     windInfluence: 1.4,
+    // Most expensive of the three: the wide spread is a close-range reward, and
+    // the tempo cost is the tax on it. TUNE.
+    delayCost: 900,
   },
 };
 
@@ -256,25 +272,35 @@ export function splashRange(splashRadius: number): number {
 }
 
 /**
- * Splash damage falloff — the Hedgewars `doMakeExplosion` curve, normalised to
- * [0, 1] and scaled by the weapon's maxDamage.
+ * The clamp on the inverse-distance curve: a direct hit deals at most this
+ * multiple of maxDamage. GunBound's `BaseDamage * radius / distance` is
+ * unbounded at the centre; ours saturates so a dead-centre hit is strong and
+ * predictable rather than arbitrary. TUNE.
+ */
+export const SPLASH_MAX_MULTIPLIER = 2;
+
+/**
+ * Splash damage falloff — an inverse-distance curve, clamped at close range.
  *
- *   range = 2*R + 4                               // damage reaches 0 here
- *   norm  = min((range - distance) / (2*R), 1)    // 1 in the core, ~0.5 at d = R
- *   dmg   = maxDamage * norm
+ *   range = 2*R + 4                     // damage reaches 0 here
+ *   edge  = R / range                   // what a raw R/d curve still holds at the edge
+ *   norm  = (R / d - edge) / (1 - edge) // 1 at d = R, 0 at d = range
+ *   dmg   = maxDamage * min(SPLASH_MAX_MULTIPLIER, norm)
  *
- * Shape notes: the curve saturates at maxDamage for the innermost 4px (the `min`
- * clamp), then decays linearly to exactly zero at `range`. A target at
- * distance R — the field misleadingly named splashRadius — takes ~50%.
+ * Shape notes: damage is proportional to R/d, so a glancing hit is far weaker
+ * than a direct one and a dead-centre hit is far stronger — up to the clamp.
+ * Subtracting `edge` and re-normalising is what makes the curve reach EXACTLY
+ * zero at `range` with no discontinuity at the boundary. A raw 1/d curve
+ * (GunBound's) does not: it still holds `R/range` ≈ 50% at the edge and then
+ * snaps to zero, leaving a cliff the linear ramp this replaced did not have.
  *
- * Normalising is what makes maxDamage a real, independent knob: the raw Hedgewars
- * expression yields damage numerically equal to R, which would force peak damage
- * to track the blast size, and truncating it at R instead of its true zero at
- * `2R+4` would leave a ~50%-damage cliff at the rim.
+ * The clamp is the deliberate divergence from GunBound. Their formula divides
+ * by the centre distance with nothing flooring it, so a hit at distance ~0 is
+ * effectively unbounded; ours saturates at `SPLASH_MAX_MULTIPLIER` × maxDamage.
  *
- * @param distance Distance in px from the explosion centre to the target.
- * @param splashRadius The weapon's splashRadius (falloff scale, ~50% point).
- * @param maxDamage The weapon's maxDamage (core damage).
+ * @param distance Distance in px from the blast to the nearest point of the body.
+ * @param splashRadius The weapon's splashRadius (falloff scale; damage here = maxDamage).
+ * @param maxDamage The weapon's maxDamage (damage at distance splashRadius).
  * @returns Damage in health points; 0 at or beyond splashRange(), never negative.
  */
 export function splashDamage(distance: number, splashRadius: number, maxDamage: number): number {
@@ -284,8 +310,9 @@ export function splashDamage(distance: number, splashRadius: number, maxDamage: 
   const range = splashRange(splashRadius);
   if (d >= range) return 0;
 
-  const norm = Math.min((range - d) / (2 * splashRadius), 1);
-  return Math.max(0, maxDamage * norm);
+  const edge = splashRadius / range;
+  const norm = (splashRadius / Math.max(d, 1) - edge) / (1 - edge);
+  return Math.max(0, maxDamage * Math.min(SPLASH_MAX_MULTIPLIER, norm));
 }
 
 /**

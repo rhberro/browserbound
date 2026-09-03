@@ -2,7 +2,7 @@ import { Room, Client } from 'colyseus';
 import {
   GRAVITY, WIND_INTEGRATION, TerrainOp, MAP_WIDTH, MAP_HEIGHT,
   DEFAULT_CRATER_RADIUS, applyOpToBitmap, collapseLips, appendOp, PLAYER_HEIGHT,
-  MOVE_STEPS, TURN_TIME_MS, TERMINAL_VELOCITY, WIND_DRIFT_SCALE, KNOCKBACK_SHOVE_SCALE,
+  MOVE_STEPS, TURN_TIME_MS, TURN_SKIP_DELAY, TERMINAL_VELOCITY, WIND_DRIFT_SCALE, KNOCKBACK_SHOVE_SCALE,
   PROJECTILE_CEILING, PROJECTILE_BOUNDS_MARGIN,
   PROJECTILE_MAX_LIFETIME_FRAMES, RECONNECT_WINDOW_SECONDS,
   walkStep, isSolid, isGrounded, groundDistance, ejectUp, computeTilt, Body,
@@ -208,6 +208,9 @@ export class GameRoom extends Room {
       // Firing ends movement and forfeits the remaining budget. The turn
       // itself passes once the projectiles resolve.
       player.movementBudget = 0;
+      // Firing costs tempo: add the weapon's delay NOW, before the turn passes,
+      // so the next-turn owner is chosen against the cost just paid (issue #35).
+      player.delay += weapon.delayCost;
       this.blockedNotified.delete(client.sessionId);
 
       for (const spec of projectileSpecs) {
@@ -354,7 +357,7 @@ export class GameRoom extends Room {
 
     this.broadcast('terrainSync', { mapId: this.map.id, ops: this.terrainOps });
 
-    const first = Array.from(this.state.players.keys())[0];
+    const first = this.lowestDelayPlayerId();
     if (first) this.beginTurn(first);
     else this.endTurnClock();
   }
@@ -623,6 +626,10 @@ export class GameRoom extends Room {
     ) {
       // No turnTimeout broadcast: nothing listened for it, and since #19 the
       // countdown reaching zero IS the notification.
+      // Passing costs tempo — far less than any shot — so skipping is a real
+      // move: give up this turn to act again sooner (issue #35).
+      const timedOut = this.state.players.get(this.state.currentPlayerId);
+      if (timedOut) timedOut.delay += TURN_SKIP_DELAY;
       this.advanceTurn();
     }
 
@@ -880,27 +887,46 @@ export class GameRoom extends Room {
   }
 
   /**
-   * Pass the turn to the next surviving player, and drift the wind because a
-   * turn ended.
+   * Pass the turn to the living player with the lowest Delay, and drift the
+   * wind because a turn ended.
+   *
+   * Delay is the whole turn-order model (issue #35): it replaces the fixed
+   * rotation. Whoever has the lowest total acts next, so a cheap shot or a pass
+   * can buy two turns in a row, and a heavy shot hands the opponent tempo.
    */
   private advanceTurn() {
-    const playerIds = Array.from(this.state.players.keys());
-    if (playerIds.length === 0) {
+    const next = this.lowestDelayPlayerId();
+    if (!next) {
       this.state.currentPlayerId = '';
       this.endTurnClock();
       return;
     }
+    this.beginTurn(next);
 
-    const currentIndex = playerIds.indexOf(this.state.currentPlayerId);
-    const nextIndex = (currentIndex + 1) % playerIds.length;
-    this.beginTurn(playerIds[nextIndex]);
-
-    // Every turn, unconditionally. The wind used to change only when this
-    // rotation wrapped back to index 0 — a "round" — which made the weather a
-    // hostage of the turn-order implementation; ticket #35 replaces the
-    // rotation with a delay queue and no wrap exists to hang it on.
+    // Every turn, unconditionally. Wind drifts per TURN, never per "round" — a
+    // round used to exist only because the rotation wrapped to index 0, and the
+    // Delay queue has no wrap to hang it on.
     this.windManager.advanceTurn();
     this.publishWind();
+  }
+
+  /**
+   * The living player who acts next: lowest Delay wins, ties resolve on the
+   * session id so every client arrives at the same answer.
+   */
+  private lowestDelayPlayerId(): string {
+    let best = '';
+    for (const [id, player] of this.state.players) {
+      if (!best) {
+        best = id;
+        continue;
+      }
+      const bestPlayer = this.state.players.get(best)!;
+      if (player.delay < bestPlayer.delay || (player.delay === bestPlayer.delay && id < best)) {
+        best = id;
+      }
+    }
+    return best;
   }
 
   /**
@@ -954,9 +980,9 @@ export class GameRoom extends Room {
 
     if (this.state.currentPlayerId !== playerId) return;
 
-    const playerIds = Array.from(this.state.players.keys());
-    if (playerIds[0]) {
-      this.beginTurn(playerIds[0]);
+    const next = this.lowestDelayPlayerId();
+    if (next) {
+      this.beginTurn(next);
     } else {
       this.state.currentPlayerId = '';
       this.endTurnClock();
@@ -1025,8 +1051,8 @@ export class GameRoom extends Room {
     // Ensure currentPlayerId always points to a valid player, and that whoever
     // holds the turn actually has a budget and a deadline.
     if (this.state.currentPlayerId === '' || !this.state.players.has(this.state.currentPlayerId)) {
-      const playerIds = Array.from(this.state.players.keys());
-      if (playerIds[0]) this.beginTurn(playerIds[0]);
+      const next = this.lowestDelayPlayerId();
+      if (next) this.beginTurn(next);
     }
 
     // Send current terrain state to the client
@@ -1101,7 +1127,10 @@ export class GameRoom extends Room {
     if (this.state.matchPhase === 'playing') {
       this.spawnCharacter(client.sessionId, this.state.players.size);
       if (this.state.players.size >= 2) this.matchStarted = true;
-      if (!this.state.currentPlayerId) this.beginTurn(client.sessionId);
+      if (!this.state.currentPlayerId) {
+        const next = this.lowestDelayPlayerId();
+        if (next) this.beginTurn(next);
+      }
     }
   }
 

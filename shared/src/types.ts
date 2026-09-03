@@ -130,6 +130,14 @@ export const TERMINAL_VELOCITY = 12;
 export const TURN_TIME_MS = 30000;
 
 /**
+ * The Delay cost of passing a turn (firing nothing, or letting the clock run
+ * out). Substantially cheaper than any weapon's cost, which is what makes
+ * skipping a real move: give up this turn to act again sooner. GunBound's
+ * `TurnSkipDelayCost`. TUNE.
+ */
+export const TURN_SKIP_DELAY = 200;
+
+/**
  * How long a dropped player keeps their character, turn and Movement Budget
  * before the match gives up on them, in seconds.
  *

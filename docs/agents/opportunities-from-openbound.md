@@ -269,3 +269,12 @@ they actually removed, drawn by a minimal pooled particle system.
 
 **Aim acceleration (#32).** Held aim controls ramp up to a floor instead of
 repeating at a fixed rate.
+
+**The Delay system (#35).** Turn order is a priority queue over each character's
+accumulated Delay rather than a fixed rotation: firing adds the weapon's cost,
+passing adds `TURN_SKIP_DELAY` (far cheaper), and whoever has the lowest total
+acts next. The HUD shows the upcoming order and each Delay.
+
+**Inverse-distance splash falloff (#36).** `splashDamage` is now proportional to
+`radius / distance`, clamped at close range so a direct hit is bounded, and
+normalised to hit exactly zero at the splash range with no boundary cliff.

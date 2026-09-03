@@ -33,6 +33,17 @@ export const turnSeconds = signal(0);
 export const matchEnded = signal(false);
 export const winnerId = signal('');
 export const mySessionId = signal('');
+
+/** One player in acting order, for the Delay readout. */
+export interface TurnOrderEntry {
+  delay: number;
+  label: string;
+  isYou: boolean;
+  isCurrent: boolean;
+}
+
+/** Living players sorted by Delay — leftmost acts next (issue #35). */
+export const turnOrder = signal<TurnOrderEntry[]>([]);
 /** How many players have asked for a rematch, and how many are here. */
 export const rematchReady = signal(0);
 export const rematchOf = signal(0);
@@ -210,6 +221,24 @@ export function syncHudSignals(gameState: GameState, inputAdapter: InputAdapter)
     winnerId.value = turnState.winnerId;
   }
   mySessionId.value = gameState.getRoomSessionId() ?? '';
+
+  // Players in acting order: lowest Delay first. Labels are stable ("You" plus
+  // P1..PN by sorted session id), so a player keeps their label as the order
+  // moves around them.
+  const players = Array.from(gameState.players.entries());
+  const stableIds = players.map(([id]) => id).sort();
+  const currentId = gameState.turnState?.currentPlayerId ?? '';
+  turnOrder.value = players
+    .map(([id, p]) => {
+      const isYou = id === mySessionId.value;
+      const label = isYou
+        ? 'You'
+        : players.length === 2
+          ? 'Opp'
+          : `P${stableIds.indexOf(id) + 1}`;
+      return { delay: p.delay, label, isYou, isCurrent: id === currentId };
+    })
+    .sort((a, b) => a.delay - b.delay || a.label.localeCompare(b.label));
 
   commitLastShot(aim);
 }

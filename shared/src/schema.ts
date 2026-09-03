@@ -59,6 +59,14 @@ export class Player extends Schema {
    * vanishes and comes back.
    */
   @type('boolean') connected = true;
+
+  /**
+   * Accumulated turn cost. The living player with the LOWEST total acts next
+   * (issue #35): firing adds the fired weapon's delay cost, and passing or
+   * timing out adds TURN_SKIP_DELAY. A cheap action can therefore buy two turns
+   * in a row, and the HUD sorts the field by this number.
+   */
+  @type('number') delay = 0;
 }
 
 /**
@@ -149,6 +157,7 @@ export type PlayerView = Pick<
   | 'tilt'
   | 'aimAngle'
   | 'connected'
+  | 'delay'
 >;
 
 /** The client's picture of one projectile. */

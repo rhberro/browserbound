@@ -1,6 +1,7 @@
 import { WindDial } from './components/WindDial';
 import { ConnectionBanner } from './components/ConnectionBanner';
 import { MatchResult } from './components/MatchResult';
+import { TurnOrder } from './components/TurnOrder';
 import { AngleControl } from './components/AngleControl';
 import { PowerBar } from './components/PowerBar';
 import { MovementBudget } from './components/MovementBudget';
@@ -25,6 +26,7 @@ export function HudRoot({ gameState }: { gameState: GameState }) {
 
       <div>
         <WindDial />
+        <TurnOrder />
         <ConnectionBanner />
       </div>
 

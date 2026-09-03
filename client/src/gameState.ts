@@ -31,6 +31,7 @@ function snapshot(player: Player): PlayerView {
     tilt: player.tilt,
     aimAngle: player.aimAngle,
     connected: player.connected,
+    delay: player.delay,
   };
 }
 
