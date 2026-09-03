@@ -126,8 +126,6 @@ export class GameState {
   /** Notified when the connection drops and again when it is restored. */
   public onConnectionChange: ((connected: boolean) => void) | null = null;
 
-  /** Notified as players vote for a rematch: how many are ready, out of how many. */
-  public onRematchReady: ((ready: number, of: number) => void) | null = null;
 
   /** Notified when this character walks into terrain it cannot climb. */
   public onBlocked: (() => void) | null = null;
@@ -420,11 +418,6 @@ export class GameState {
     this.room.onMessage('unableToMove', (data: { playerId: string }) => {
       if (data.playerId === this.room?.sessionId) this.onBlocked?.();
     });
-
-    this.room.onMessage('rematchReady', (data: { ready: number; of: number }) => {
-      this.onRematchReady?.(data.ready, data.of);
-    });
-
   }
 
   private updateTurnState() {
@@ -497,11 +490,6 @@ export class GameState {
     if (this.room) {
       this.room.send('fire', { power, weaponType });
     }
-  }
-
-  /** Ask for a rematch. The match restarts once every client here has asked. */
-  requestRematch() {
-    this.room?.send('rematch');
   }
 
   sendAimAngle(angle: number) {
@@ -594,12 +582,6 @@ export class GameState {
     this.room.onMessage('terrainSync', (message: any) => {
       this.pendingMapId = message.mapId;
       this.pendingTerrainOps = message.ops || [];
-    });
-
-    this.room.onMessage('rematchReady', (message: any) => {
-      if (this.onRematchReady) {
-        this.onRematchReady(message.ready, message.of);
-      }
     });
 
     this.room.onMessage('blocked', () => {

@@ -122,17 +122,6 @@ export class GameRoom extends Room {
    * player has ever joined, and every room would end the instant it opened.
    */
   private matchStarted: boolean = false;
-  /** Sessions that have asked for a rematch since the match ended. */
-  private rematchReady: Set<string> = new Set();
-  /**
-   * Sessions inside an open reconnection window.
-   *
-   * Colyseus removes a client from `this.clients` before onDrop, so a dropped
-   * player is invisible to any head count. Without tracking them, a rematch
-   * could start while someone was still on their way back — and they would
-   * return to a match rebuilt without them.
-   */
-  private droppedSessions: Set<string> = new Set();
   /** A character left the field this frame; re-check the match at frame end. */
   private matchEndDirty: boolean = false;
   /**
@@ -265,16 +254,6 @@ export class GameRoom extends Room {
 
       // Clamp chassis-relative aim angle to valid range (in degrees, convert to radians)
       player.aimAngle = degToRad(clampAimDeg(data.angle));
-    });
-
-    this.onMessage('rematch', (client) => {
-      if (this.state.matchPhase !== 'ended') return;
-      this.rematchReady.add(client.sessionId);
-      this.broadcast('rematchReady', {
-        ready: this.rematchReady.size,
-        of: this.clients.length,
-      });
-      this.considerRematch();
     });
 
     this.onMessage('fire', (client, data: any) => {
@@ -522,58 +501,6 @@ export class GameRoom extends Room {
    * relying on the room being recreated, because the whole point is that
    * nobody has to reconnect.
    */
-  private startRematch(): void {
-    this.rematchReady.clear();
-    this.terrainOps = [];
-    this.initializeTerrainPlatform();
-
-    this.state.projectiles.clear();
-    this.pendingProjectiles = [];
-    this.walkWindup.clear();
-    this.fallDelay.clear();
-    this.windDrift.clear();
-    this.blockedNotified.clear();
-    this.playerInputs.clear();
-
-    // Everyone still connected gets a character again, including whoever lost
-    // the last match and had theirs removed.
-    this.state.players.clear();
-    this.clients.forEach((client, index) => {
-      this.spawnCharacter(client.sessionId, index);
-    });
-
-    this.matchStarted = this.state.players.size >= 2;
-    this.state.matchPhase = 'playing';
-    this.state.winningTeamId = -1;
-    // A rematch gets fresh weather rather than inheriting the wind the last
-    // match happened to drift into.
-    this.windManager.generateNewWind();
-    this.publishWind();
-
-    this.broadcast('terrainSync', { mapId: this.map.id, ops: this.terrainOps });
-
-    const first = this.lowestDelayPlayerId();
-    if (first) this.beginTurn(first);
-    else this.endTurnClock();
-  }
-
-  /**
-   * Begin a rematch once every connected client has asked for one.
-   *
-   * Recomputed on departure as well as on request, so a player who
-   * disconnects while the other is waiting cannot hold the room in a finished
-   * match forever.
-   */
-  private considerRematch(): void {
-    if (this.state.matchPhase !== 'ended') return;
-    // Someone is mid-reconnect. Starting now would rebuild the match without
-    // them and strand them on arrival; their window expiring calls back here.
-    if (this.droppedSessions.size > 0) return;
-    if (this.clients.length === 0) return;
-    if (this.rematchReady.size < this.clients.length) return;
-    this.startRematch();
-  }
-
   private isSolidAt(x: number, y: number): boolean {
     const ix = Math.floor(x);
     const iy = Math.floor(y);
@@ -796,9 +723,6 @@ export class GameRoom extends Room {
     if (this.matchEndDirty) {
       this.matchEndDirty = false;
       this.checkMatchEnd();
-      // The phase may only now have flipped, and a player who asked for a
-      // rematch before that had their vote ignored as premature.
-      this.considerRematch();
     }
 
     // Pass the turn only once nothing is airborne AND nothing is still staged
@@ -1269,7 +1193,6 @@ export class GameRoom extends Room {
       const player = this.state.players.get(client.sessionId);
       if (player) {
         player.connected = true;
-        this.droppedSessions.delete(client.sessionId);
       }
     } else {
       // Lobby phase - send current terrain state for later use
@@ -1290,8 +1213,6 @@ export class GameRoom extends Room {
     this.fallDelay.clear();
     this.windDrift.clear();
     this.blockedNotified.clear();
-    this.rematchReady.clear();
-    this.droppedSessions.clear();
     this.pendingProjectiles = [];
     this.terrainOps = [];
     this.terrainBitmap = new Uint8Array(0);
@@ -1315,8 +1236,6 @@ export class GameRoom extends Room {
     this.playerInputs.delete(client.sessionId);
     player.connected = false;
 
-    this.droppedSessions.add(client.sessionId);
-
     try {
       await this.allowReconnection(client, RECONNECT_WINDOW_SECONDS);
       // Resolved: they are back, and onReconnect has run.
@@ -1324,10 +1243,6 @@ export class GameRoom extends Room {
       // Rejection is the NORMAL expiry path, not an error — the window closed
       // and onLeave will run for the permanent departure. Unhandled, this was
       // a rejected promise for every player who ever failed to come back.
-    } finally {
-      this.droppedSessions.delete(client.sessionId);
-      // Someone may have been waiting on this player to vote for a rematch.
-      this.considerRematch();
     }
   }
 
@@ -1339,9 +1254,9 @@ export class GameRoom extends Room {
       return;
     }
 
-    // No character: either theirs was destroyed, or a rematch rebuilt the
-    // match while they were away. onJoin does not run again for a reconnect,
-    // so without this they would sit in a live match with nothing to play.
+    // No character: theirs was destroyed while they were reconnecting.
+    // onJoin does not run again for a reconnect, so without this they would
+    // sit in a live match with nothing to play.
     if (this.state.matchPhase === 'playing') {
       this.spawnCharacter(client.sessionId, this.state.players.size);
       if (this.state.players.size >= 2) this.matchStarted = true;
@@ -1360,13 +1275,8 @@ export class GameRoom extends Room {
    * a deliberate leave and for a drop whose window expired.
    */
   async onLeave(client: Client) {
-    // A player whose character was destroyed is still a client — they are
-    // watching the result and may want a rematch — so this bookkeeping runs
-    // whether or not they still have a character on the field.
-    this.rematchReady.delete(client.sessionId);
     this.playerInputs.delete(client.sessionId);
 
     this.removePlayer(client.sessionId);
-    this.considerRematch();
   }
 }

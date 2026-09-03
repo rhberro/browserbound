@@ -1,11 +1,9 @@
-import { matchEnded, matchResultText, rematchText } from '../signals';
-import type { GameState } from '../../gameState';
+import { matchEnded, matchResultText } from '../signals';
 
 /**
- * The end-of-match overlay — Variant 2: frosted neon panel with the result and
- * a way to play again.
+ * The end-of-match overlay — displays the result and automatically returns to lobby.
  */
-export function MatchResult({ gameState }: { gameState: GameState }) {
+export function MatchResult() {
   if (!matchEnded.value) return null;
 
   return (
@@ -14,16 +12,8 @@ export function MatchResult({ gameState }: { gameState: GameState }) {
         <span class="hud-label">Match over</span>
         <span class="text-3xl font-black text-ink">{matchResultText}</span>
 
-        <button
-          type="button"
-          class="bg-accent px-6 py-2.5 text-sm font-bold text-neutral-950 transition-colors hover:bg-accent-600"
-          onClick={() => gameState.requestRematch()}
-        >
-          {rematchText}
-        </button>
-
         <span class="text-[10px] text-neutral-500">
-          Starts when both players are ready
+          Returning to lobby...
         </span>
       </div>
     </div>

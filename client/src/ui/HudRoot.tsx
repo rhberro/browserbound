@@ -24,7 +24,7 @@ import type { GameState } from '../gameState';
 export function HudRoot({ gameState }: { gameState: GameState }) {
   return (
     <div class="relative flex h-full flex-col">
-      <MatchResult gameState={gameState} />
+      <MatchResult />
 
       <div class="pointer-events-none flex items-start justify-between px-5 pt-4">
         <TurnOrder />

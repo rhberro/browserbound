@@ -44,9 +44,6 @@ export interface TurnOrderEntry {
 
 /** Living players sorted by Delay — leftmost acts next (issue #35). */
 export const turnOrder = signal<TurnOrderEntry[]>([]);
-/** How many players have asked for a rematch, and how many are here. */
-export const rematchReady = signal(0);
-export const rematchOf = signal(0);
 
 /** Epoch ms of the last Blocked Move, so the cue can fade on its own. */
 export const blockedAt = signal(0);
@@ -142,9 +139,6 @@ export const matchResultText = computed(() => {
   return 'Match ended'; // Team-based result text will be implemented in issue #49
 });
 
-export const rematchText = computed(() =>
-  rematchOf.value > 1 ? `Rematch (${rematchReady.value}/${rematchOf.value})` : 'Rematch'
-);
 /** The last five seconds of a turn, when the countdown should read as urgent. */
 export const isTurnEnding = computed(() => isMyTurn.value && turnSeconds.value > 0 && turnSeconds.value <= 5);
 

@@ -7,8 +7,6 @@ import { mountHud, unmountHud } from '../ui/mountHud';
 import {
   syncHudSignals,
   isConnected,
-  rematchReady,
-  rematchOf,
   blockedAt,
 } from '../ui/signals';
 
@@ -56,11 +54,6 @@ export class GameScene {
 
     this.gameState.onBlocked = () => {
       blockedAt.value = Date.now();
-    };
-
-    this.gameState.onRematchReady = (ready, of) => {
-      rematchReady.value = ready;
-      rematchOf.value = of;
     };
 
     // Blow up players the moment the server reports them dead
