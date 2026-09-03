@@ -6,10 +6,7 @@
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
     "type-check": "tsc --noEmit",
-    "test": "vitest run",
-    "test:ui": "vitest --ui",
     "generate-maps": "tsx scripts/generate-maps.ts",
-    "test:watch": "vitest",
     "smoke": "tsx scripts/smoke.ts"
   },
   "dependencies": {
