@@ -1,6 +1,6 @@
 import { h } from 'preact';
 import { useState, useEffect } from 'preact/hooks';
-import { GameState } from '../../gameState';
+import { getGameState } from '../../index';
 
 interface FindServersProps {
   onNavigate: (scene: string) => void;
@@ -23,7 +23,7 @@ export function FindServers({ onNavigate }: FindServersProps) {
     const loadRooms = async () => {
       try {
         setLoading(true);
-        const gameState = new GameState();
+        const gameState = getGameState();
         const availableRooms = await gameState.discoverRooms();
 
         const roomList = availableRooms.map((room: any) => ({
@@ -47,7 +47,7 @@ export function FindServers({ onNavigate }: FindServersProps) {
 
   const handleJoinRoom = async (roomId: string) => {
     try {
-      const gameState = new GameState();
+      const gameState = getGameState();
       await gameState.joinRoom(roomId);
       onNavigate('lobby');
     } catch (err) {

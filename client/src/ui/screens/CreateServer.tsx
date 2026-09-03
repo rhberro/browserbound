@@ -1,6 +1,6 @@
 import { h } from 'preact';
 import { useState } from 'preact/hooks';
-import { GameState } from '../../gameState';
+import { getGameState } from '../../index';
 
 interface CreateServerProps {
   onNavigate: (scene: string) => void;
@@ -23,7 +23,7 @@ export function CreateServer({ onNavigate }: CreateServerProps) {
     try {
       setLoading(true);
       setError('');
-      const gameState = new GameState();
+      const gameState = getGameState();
       await gameState.createRoom({
         mode,
         roomName: roomName.trim(),

@@ -15,6 +15,14 @@ let app: PIXI.Application | null = null;
 let gameState: GameState | null = null;
 let gameScene: GameScene | null = null;
 
+// Export for use in screens
+export function getGameState(): GameState {
+  if (!gameState) {
+    gameState = new GameState();
+  }
+  return gameState;
+}
+
 async function initializeGame() {
   if (app) return;
 
@@ -33,7 +41,7 @@ async function initializeGame() {
   container.appendChild(app.canvas);
 
   gameState = new GameState();
-  await gameState.connect();
+  // Don't connect here - only connect when actually joining/creating a room
 
   gameScene = new GameScene(app, gameState);
 

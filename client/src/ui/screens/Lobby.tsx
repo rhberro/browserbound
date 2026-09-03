@@ -1,6 +1,6 @@
 import { h } from 'preact';
 import { useState, useEffect } from 'preact/hooks';
-import { GameState } from '../../gameState';
+import { getGameState } from '../../index';
 import { Seat, teamOfSeat } from '@browserbond/shared';
 
 interface LobbyProps {
@@ -17,7 +17,7 @@ interface SeatUI {
 }
 
 export function Lobby({ onNavigate }: LobbyProps) {
-  const [gameState] = useState(() => new GameState());
+  const [gameState] = useState(() => getGameState());
   const [seats, setSeats] = useState<SeatUI[]>([]);
   const [mySessionId, setMySessionId] = useState('');
   const [isHost, setIsHost] = useState(false);
