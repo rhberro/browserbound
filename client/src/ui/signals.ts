@@ -1,7 +1,7 @@
 import { computed, signal } from '@preact/signals';
 import type { GameState } from '../gameState';
 import type { AimState, InputAdapter } from '../adapters/InputAdapter';
-import { MOVE_BUDGET } from '@browserbond/shared';
+import { MOVE_STEPS } from '@browserbond/shared';
 import { readLastShotValue, writeLastShotValue } from './lastShotStore';
 import { windRotationDeg } from './windDialGeometry';
 
@@ -25,7 +25,7 @@ export const windDirection = signal(0);
 
 /** Pixels of walking left this turn, and the budget a full turn starts with. */
 export const movementBudget = signal(0);
-export const movementBudgetMax = signal(MOVE_BUDGET);
+export const movementBudgetMax = signal(MOVE_STEPS);
 /** Whole seconds left in the current turn. */
 export const turnSeconds = signal(0);
 

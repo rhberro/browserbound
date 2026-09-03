@@ -2,9 +2,9 @@ import { Room, Client } from 'colyseus';
 import {
   GRAVITY, WIND_INTEGRATION, TerrainOp, MAP_WIDTH, MAP_HEIGHT,
   DEFAULT_CRATER_RADIUS, applyOpToBitmap, collapseLips, appendOp, PLAYER_HEIGHT,
-  MOVE_BUDGET, WALK_SPEED, TURN_TIME_MS, TERMINAL_VELOCITY,
+  MOVE_STEPS, TURN_TIME_MS, TERMINAL_VELOCITY, WIND_DRIFT_DIVISOR,
   PROJECTILE_MAX_LIFETIME_FRAMES, RECONNECT_WINDOW_SECONDS,
-  walkStep, settle, testCollisionY, pushOutOfWall, airborneHorizontal, computeTilt, Body,
+  walkStep, isSolid, isGrounded, groundDistance, ejectUp, computeTilt, Body,
   pointInBody,
   worldFiringAngle, clampAimDeg, degToRad,
   Player, RoomState, Projectile,
@@ -13,6 +13,7 @@ import { PhysicsAdapter, Wind } from '@browserbond/shared/src/adapters/PhysicsAd
 import { MessageValidationAdapter } from '@browserbond/shared/src/adapters/MessageValidationAdapter';
 import { WindManager } from '../adapters/WindManager';
 import { shouldAdvanceTurn, nothingInFlight } from './turnLoop';
+import { advanceTimer, windupElapsed, fallDelayElapsed, nextFallSpeed } from './gait';
 import { loadMap, loadRandomMap, LoadedMap } from '../adapters/MapLoader';
 import {
   getWeapon,
@@ -48,13 +49,6 @@ function makeProjectile(
   return proj;
 }
 
-/**
- * Fractional pixels of walk carried between frames. At WALK_SPEED 120 px/s and
- * a 16 ms tick that is 1.92 px per frame; rounding each frame independently
- * would quietly walk at 125 px/s instead.
- */
-const WALK_PX_PER_MS = WALK_SPEED / 1000;
-
 /** Fixed simulation tick, matching setSimulationInterval below. */
 const SIMULATION_INTERVAL_MS = 16;
 
@@ -81,8 +75,6 @@ export class GameRoom extends Room {
   private roundsCompleted: number = 0;
   private currentWindDuration: number = 0;
   private lastPlayerId: string = '';
-  /** Sub-pixel walk remainder per player; see WALK_PX_PER_MS. */
-  private walkCarry: Map<string, number> = new Map();
   /** Players already told they are against a wall, to debounce the cue. */
   private blockedNotified: Set<string> = new Set();
   /**
@@ -110,8 +102,22 @@ export class GameRoom extends Room {
   private droppedSessions: Set<string> = new Set();
   /** A character left the field this frame; re-check the match at frame end. */
   private matchEndDirty: boolean = false;
-  /** Fractional vx accumulation for airborne horizontal stepping. */
-  private airborneVxCarry: Map<string, number> = new Map();
+  /**
+   * Milliseconds a direction has been held, per player. A character takes no
+   * step until this passes WALK_WINDUP_MS, and — crucially — it is NOT reset by
+   * taking a step. It is a one-time hesitation on key-down followed by a steady
+   * crawl, which is what GunBound's `sidewaysDelayTimer` does. Resetting it per
+   * step instead would produce a 10 px/s character.
+   */
+  private walkWindup: Map<string, number> = new Map();
+  /** Milliseconds a character has been unsupported. Gravity waits FALL_DELAY_MS. */
+  private fallDelay: Map<string, number> = new Map();
+  /**
+   * Sub-pixel wind drift accumulated over a fall, clamped to +/-1 and spent as
+   * whole pixels. Weak wind nudges a long fall now and then rather than sliding
+   * it continuously.
+   */
+  private windDrift: Map<string, number> = new Map();
   private map!: LoadedMap;
 
   constructor() {
@@ -336,8 +342,9 @@ export class GameRoom extends Room {
 
     this.state.projectiles.clear();
     this.pendingProjectiles = [];
-    this.walkCarry.clear();
-    this.airborneVxCarry.clear();
+    this.walkWindup.clear();
+    this.fallDelay.clear();
+    this.windDrift.clear();
     this.blockedNotified.clear();
     this.playerInputs.clear();
 
@@ -515,11 +522,20 @@ export class GameRoom extends Room {
 
           // Apply knockback
           const kb = knockbackImpulse(dx, dy, dmg, weapon.knockbackScale);
-          if (kb.ix !== 0 || kb.iy !== 0) {
+          if (kb.ix !== 0) {
+            // HORIZONTAL ONLY, deliberately. Since ADR 0004 a character has no
+            // upward motion at all — gravity moves it down toward the surface
+            // and nothing moves it up — so an upward `iy` would be silently
+            // discarded by the next tick's fall. Taking only `ix` says that
+            // plainly instead of storing an impulse nothing will ever spend.
+            // This matches GunBound, where a blast shoves a mobile sideways and
+            // it falls; mobiles are never launched.
             player.vx += kb.ix;
-            player.vy += kb.iy;
             player.airborne = true;
-            this.airborneVxCarry.delete(playerId);
+            // A fresh blast restarts the hang, so a character shot off a ledge
+            // gets the same beat before dropping as one whose ground vanished.
+            this.fallDelay.delete(playerId);
+            this.windDrift.delete(playerId);
           }
 
           if (player.health <= 0) {
@@ -603,72 +619,59 @@ export class GameRoom extends Room {
     for (const [playerId, player] of this.state.players) {
       const body: Body = { x: player.x, y: player.y };
 
-      // Terrain can be drawn over a body (a rect op); eject it before anything
-      // else reads its position. Bails rather than teleporting if truly wedged.
-      pushOutOfWall(this.terrainBitmap, MAP_WIDTH, MAP_HEIGHT, body);
+      // Terrain can be drawn over a contact point (a rect op); lift it out
+      // before anything else reads its position. A point can only ever be
+      // buried straight down, so this is a lift and nothing more.
+      ejectUp(this.terrainBitmap, MAP_WIDTH, MAP_HEIGHT, body);
 
-      const grounded = testCollisionY(this.terrainBitmap, MAP_WIDTH, MAP_HEIGHT, body, 1);
+      const grounded = isGrounded(this.terrainBitmap, MAP_WIDTH, MAP_HEIGHT, body);
 
       if (!grounded) {
         // Airborne. Ground destroyed under the feet lands here on the next
         // frame with no special case.
         player.airborne = true;
+        this.walkWindup.delete(playerId);
 
-        // Apply gravity and clamp both velocity axes to TERMINAL_VELOCITY.
-        player.vy = Math.min(player.vy + GRAVITY, TERMINAL_VELOCITY);
-        player.vx = Math.max(-TERMINAL_VELOCITY, Math.min(player.vx, TERMINAL_VELOCITY));
+        // The hang. Gravity does nothing for FALL_DELAY_MS, which is what makes
+        // ground collapsing underfoot read as a beat rather than a snap.
+        const hung = advanceTimer(this.fallDelay.get(playerId) ?? 0, SIMULATION_INTERVAL_MS);
+        this.fallDelay.set(playerId, hung);
+        if (!fallDelayElapsed(hung)) {
+          player.vy = 0;
+        } else {
+          player.vy = nextFallSpeed(player.vy);
 
-        // Horizontal movement: try lifting when blocked, bounce if all lifts fail.
-        // Accumulate fractional velocity like walkCarry does for walking movement.
-        // For each pixel of movement, call airborneHorizontal which applies damping
-        // on successful climbs or bounces on wall contact.
-        const vxCarry = this.airborneVxCarry.get(playerId) ?? 0;
-        const vxTotal = vxCarry + player.vx;
-        const vxPixels = Math.floor(Math.abs(vxTotal));
+          this.stepAirborneHorizontal(playerId, player, body);
 
-        // Process remaining pixels until exhausted or velocity reverses
-        let remaining = vxPixels;
-        while (remaining > 0) {
-          const oldDir = Math.sign(player.vx) || 0;
-          player.vx = airborneHorizontal(
+          // Move by at most the distance to the ground, so a fall can never
+          // overshoot into terrain. This is why there is no settle step and no
+          // per-pixel descent loop: landing is exact by construction.
+          const drop = groundDistance(
             this.terrainBitmap,
             MAP_WIDTH,
             MAP_HEIGHT,
-            body,
-            player.vx
+            body.x,
+            body.y,
+            player.vy
           );
-          const newDir = Math.sign(player.vx) || 0;
+          body.y += drop;
 
-          // If direction reversed (bounced) or velocity became negligible, stop moving
-          if (oldDir !== 0 && newDir !== oldDir) break;
-          if (Math.abs(player.vx) < 0.01) break;
-
-          remaining--;
-        }
-
-        // Store fractional component for next frame
-        this.airborneVxCarry.set(playerId, vxTotal - Math.sign(vxTotal) * vxPixels);
-
-        // Descend one pixel at a time so a fast fall cannot tunnel through thin ground.
-        let remainingVy = player.vy;
-        while (remainingVy > 0) {
-          const stepPx = Math.min(1, remainingVy);
-          body.y += stepPx;
-          remainingVy -= stepPx;
-          if (testCollisionY(this.terrainBitmap, MAP_WIDTH, MAP_HEIGHT, body, 1)) {
-            settle(this.terrainBitmap, MAP_WIDTH, MAP_HEIGHT, body);
+          if (isGrounded(this.terrainBitmap, MAP_WIDTH, MAP_HEIGHT, body)) {
             player.vy = 0;
             player.vx = 0;
             player.airborne = false;
             // Facing sign is deliberately preserved: a character must not
             // silently turn around because it landed.
-            this.airborneVxCarry.delete(playerId);
-            break;
+            this.fallDelay.delete(playerId);
+            this.windDrift.delete(playerId);
           }
         }
       } else {
         player.vy = 0;
+        player.vx = 0;
         player.airborne = false;
+        this.fallDelay.delete(playerId);
+        this.windDrift.delete(playerId);
 
         const input = this.playerInputs.get(playerId);
         const isCurrent = playerId === this.state.currentPlayerId;
@@ -683,44 +686,36 @@ export class GameRoom extends Room {
         }
 
         if (isCurrent && dir !== 0 && player.movementBudget > 0) {
-          const carried = this.walkCarry.get(playerId) ?? 0;
-          const wanted = carried + WALK_PX_PER_MS * SIMULATION_INTERVAL_MS;
-          let pixels = Math.floor(wanted);
-          this.walkCarry.set(playerId, wanted - pixels);
+          // The wind-up. Held time accumulates and is spent only on the first
+          // step; from then on it stays above the threshold and every tick
+          // steps. Releasing the direction is the only thing that resets it.
+          const held = advanceTimer(this.walkWindup.get(playerId) ?? 0, SIMULATION_INTERVAL_MS);
+          this.walkWindup.set(playerId, held);
 
-          pixels = Math.min(pixels, player.movementBudget);
-
-          let blocked = false;
-          for (let i = 0; i < pixels; i++) {
+          if (windupElapsed(held)) {
             const result = walkStep(this.terrainBitmap, MAP_WIDTH, MAP_HEIGHT, body, dir);
+
             if (result === 'moved') {
-              // Budget is spent per pixel ADVANCED. Climbing and descending are
-              // free, and a blocked move costs nothing.
+              // The budget is a STEP COUNT. A blocked step costs nothing, and
+              // walking off a ledge costs the step that took you over it.
               player.movementBudget -= 1;
-            } else if (result === 'blocked') {
-              blocked = true;
-              break;
-            } else {
-              // 'fell' — walkStep has already undone the drop; velocity and
-              // airborne state are the integrator's business, not its own.
+              this.blockedNotified.delete(playerId);
+            } else if (result === 'fell') {
+              player.movementBudget -= 1;
               player.vy = 0;
               player.airborne = true;
-              break;
+              this.blockedNotified.delete(playerId);
+            } else {
+              // Once per blocked run, not once per frame: a player holding a
+              // direction against a wall would otherwise flood the channel.
+              if (!this.blockedNotified.has(playerId)) {
+                this.blockedNotified.add(playerId);
+                this.broadcast('unableToMove', { playerId, x: body.x, y: body.y });
+              }
             }
-          }
-
-          if (blocked) {
-            // Once per blocked run, not once per frame: a player holding a
-            // direction against a wall would otherwise flood the channel.
-            if (!this.blockedNotified.has(playerId)) {
-              this.blockedNotified.add(playerId);
-              this.broadcast('unableToMove', { playerId, x: body.x, y: body.y });
-            }
-          } else {
-            this.blockedNotified.delete(playerId);
           }
         } else {
-          this.walkCarry.set(playerId, 0);
+          this.walkWindup.delete(playerId);
           if (dir === 0) this.blockedNotified.delete(playerId);
         }
       }
@@ -750,13 +745,60 @@ export class GameRoom extends Room {
   }
 
   /**
+   * Lateral motion for a FALLING character: wind drift plus whatever knockback
+   * velocity it still carries. Mutates `body` and `player.vx`.
+   *
+   * Deliberately without a bounce or a mid-air climb. GunBound falls straight
+   * down and lets only the wind push sideways; we keep knockback because it is
+   * tuned into every weapon's `knockbackScale`, but a character that meets a
+   * wall STOPS against it rather than reflecting off it. The old
+   * `WALL_ELASTICITY` ping-pong was the most visibly wrong thing our physics
+   * did. (Setting every `knockbackScale` to 0 reduces this to exact GunBound
+   * behaviour without touching this code.)
+   */
+  private stepAirborneHorizontal(playerId: string, player: Player, body: Body) {
+    const wind: Wind = this.windManager.getCurrentWind();
+    // The same acceleration the projectiles get, so there is one answer to
+    // "what is the wind doing".
+    const windAx = wind.magnitude * Math.cos(wind.angle) * WIND_INTEGRATION;
+
+    const drift = Math.max(
+      -1,
+      Math.min(1, (this.windDrift.get(playerId) ?? 0) + windAx / WIND_DRIFT_DIVISOR)
+    );
+
+    // Knockback is real velocity; wind is a sub-pixel accumulator that spends
+    // itself a whole pixel at a time.
+    const vx = Math.max(-TERMINAL_VELOCITY, Math.min(player.vx, TERMINAL_VELOCITY));
+    player.vx = vx;
+    const pixels = Math.trunc(vx) + Math.trunc(drift);
+
+    // Whatever the accumulator did not spend is carried; the knockback pixels
+    // are spent from real velocity and are not.
+    this.windDrift.set(playerId, drift - Math.trunc(drift));
+
+    const step = Math.sign(pixels);
+    for (let i = 0; i < Math.abs(pixels); i++) {
+      if (isSolid(this.terrainBitmap, MAP_WIDTH, MAP_HEIGHT, body.x + step, body.y)) {
+        // Stop against the wall. Both forces die here: reflecting the velocity
+        // is the bounce, and carrying the drift would grind the character
+        // along the face for the rest of the fall.
+        player.vx = 0;
+        this.windDrift.set(playerId, 0);
+        return;
+      }
+      body.x += step;
+    }
+  }
+
+  /**
    * Start `playerId`'s turn: refill the Movement Budget and arm the turn timer.
    */
   private beginTurn(playerId: string) {
     this.state.currentPlayerId = playerId;
     const player = this.state.players.get(playerId);
     if (player) {
-      player.movementBudget = MOVE_BUDGET;
+      player.movementBudget = MOVE_STEPS;
       // Aim is NOT reset. ADR 0003 makes the chassis-relative measurement the
       // thing that stays put, and zeroing it here put the server at 0 while
       // the client's HUD and aim line still read whatever the player had
@@ -764,8 +806,7 @@ export class GameRoom extends Room {
     }
     this.turnEndsAtMs = Date.now() + TURN_TIME_MS;
     this.publishTurnClock();
-    this.walkCarry.set(playerId, 0);
-    this.airborneVxCarry.set(playerId, 0);
+    this.walkWindup.delete(playerId);
     this.blockedNotified.delete(playerId);
   }
 
@@ -838,9 +879,10 @@ export class GameRoom extends Room {
 
     this.state.players.delete(playerId);
     this.playerInputs.delete(playerId);
-    this.walkCarry.delete(playerId);
+    this.walkWindup.delete(playerId);
+    this.fallDelay.delete(playerId);
+    this.windDrift.delete(playerId);
     this.blockedNotified.delete(playerId);
-    this.airborneVxCarry.delete(playerId);
 
     // NOT checked here. Two characters can die in the same frame — a splash
     // kill plus an out-of-bounds death, or both crossing the Kill Boundary —
@@ -934,9 +976,10 @@ export class GameRoom extends Room {
    */
   onDispose() {
     this.playerInputs.clear();
-    this.walkCarry.clear();
+    this.walkWindup.clear();
+    this.fallDelay.clear();
+    this.windDrift.clear();
     this.blockedNotified.clear();
-    this.airborneVxCarry.clear();
     this.rematchReady.clear();
     this.droppedSessions.clear();
     this.pendingProjectiles = [];

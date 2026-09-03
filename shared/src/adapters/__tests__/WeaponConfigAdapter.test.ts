@@ -195,8 +195,8 @@ describe('WeaponConfigAdapter', () => {
 
     it('should let a full volley saturate the terminal-velocity clamp without overwhelming it', () => {
       // Every weapon is tuned so that a clean hit SATURATES the clamp: the
-      // airborne integrator caps both velocity axes at TERMINAL_VELOCITY every
-      // frame, and a direct hit that lands under that cap would barely move the
+      // airborne integrator caps horizontal knockback at TERMINAL_VELOCITY every
+      // tick, and a direct hit that lands under that cap would barely move the
       // target. So an impulse above TERMINAL_VELOCITY is the intent, not a bug.
       //
       // What still needs bounding is how far above. The clamp discards the

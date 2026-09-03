@@ -115,6 +115,12 @@ This separation enables:
 - **WIND_DURATION_MIN, WIND_DURATION_MAX**: Rounds (5–10)
 - **RECONNECT_WINDOW_SECONDS**: How long a dropped player keeps their character and turn
 - **PROJECTILE_MAX_LIFETIME_FRAMES**: Backstop after which an unresolved projectile is retired
+- **STEP_UP_LIMIT, STEP_DOWN_LIMIT**: The Step Window — how far a character reaches for the surface
+  one pixel ahead, and therefore its climb angle
+- **WALK_WINDUP_MS**: Hesitation before a held direction produces its first step
+- **MOVE_STEPS**: Steps a character may take per turn
+- **FALL_DELAY_MS, FALL_INITIAL_SPEED, FALL_ACCEL**: The Hang, and the fall that follows it
+- **WIND_DRIFT_DIVISOR**: Scales wind into the sideways Drift of a falling character
 
 ## Why This Design
 
@@ -128,6 +134,8 @@ This separation enables:
 ## Related Decisions
 
 - [[ADR-0001-physics-adapter]] — Why PhysicsAdapter is stateless and where it sits in the game loop
+- [[ADR-0004-point-contact-terrain]] — Why a character touches the terrain at one pixel, and why the
+  Drawn Body is a different size doing a different job
 - [[server/CONTEXT.md]] — Server-specific: GameRoom's role in managing turn state, collision detection
 - [[client/CONTEXT.md]] — Client-specific: rendering projectiles, UI wind display
 
@@ -161,60 +169,89 @@ A roof is only collapsed when it is *both* thin *and* over an unusable space. A 
 thin roof with room to walk under it, is a cave and survives — caves are the reason terrain is
 recorded per pixel at all.
 
-### Character Body
+### Contact Point
 
-The **Character Body** is the rectangle the simulation moves: a fixed width and height, centred
-horizontally on the character's position and standing *on* it — the position is the **feet**, not
-the centre. Everything that asks "where is this character?" asks about this box: walking, wall
-tests, ground finding, and projectile hits.
+A character touches the terrain at a **single pixel** — the Contact Point. Its position *is* that
+pixel: the topmost solid row of the ground beneath it. "Standing on the ground" and "the pixel at
+my position is solid" are the same statement.
 
-Projectiles are tested against it directly. A shot at head height therefore registers, and a shot
-passing below the feet, inside the ground, does not. It was previously a circle centred on the feet,
-which got both of those backwards.
+This is the whole of the character's relationship with the terrain. Nothing sweeps a shape against
+the mask, nothing probes several columns and picks a winner, and nothing has to be freed from
+terrain it has sunk into except by lifting it straight up. See `docs/adr/0004-point-contact-terrain.md`
+for why a rectangle was tried first and what it cost.
 
-The body is **axis-aligned regardless of Chassis Tilt**. Tilt is what the character is drawn at and
-what its shot obeys; it does not rotate the box the physics moves, and the collision test must agree
-with the box, not the drawing.
+### Drawn Body
 
-### Climb Angle
+The **Drawn Body** is the rectangle a character is *rendered* as and the box a projectile is tested
+against: a fixed width and height, centred horizontally on the Contact Point and standing on it, so
+the position is the feet rather than the centre.
 
-The **Climb Angle** is the steepest continuous slope a character can walk up. It is the game's
-definition of "too steep".
+It is deliberately **not** what the simulation moves. The two are different sizes doing different
+jobs, and the consequence is accepted: a character standing beside a steep face clips into it,
+because nothing stops the drawing from overlapping terrain the Contact Point is clear of. Chassis
+Tilt is what makes this read as correct — the eye takes the angle of the body as the statement
+about where the ground is.
 
-It is measured, not inferred: the surface under the feet against the surface one body width further
-along, taken in the direction of travel. The run length is what makes the measurement mean anything,
-because it is the only thing that tells a slope from a step — a ledge rises by a fixed amount however
-far you measure, while an incline's rise grows with the run.
+Projectiles are tested against the Drawn Body directly. A shot at head height therefore registers,
+and a shot passing below the feet, inside the ground, does not. It was previously a circle centred
+on the feet, which got both of those backwards.
 
-### Step-Up Limit
+The Drawn Body is **axis-aligned regardless of Chassis Tilt**. Tilt is what the character is drawn
+at and what its shot obeys; it does not rotate the box a projectile is tested against.
 
-The **Step-Up Limit** is the tallest single obstacle a character can lift itself over in one pixel of
-travel: a ledge, a crater lip, a pebble.
+### Step Window
 
-It is deliberately *not* the Climb Angle, and the two cannot be collapsed into one number. On a
-continuous slope a body only ever rises by the gradient per pixel travelled — a few pixels, even on a
-steep hill — so a Step-Up Limit generous enough to clear a ledge waves cliffs through, and one tight
-enough to refuse a cliff forbids stepping over a pebble. One number cannot answer both questions, and
-when it was asked to, characters walked up sheer walls while gentle hills stopped them.
+The **Step Window** is how far above and below its feet a character looks for the surface one pixel
+ahead. It is the entire locomotion model: scan that column, and take the first solid pixel that
+follows an empty one.
 
-### Step-Down Limit
+Its upward reach is also the **climb angle** — the steepest continuous slope that can be walked is
+one rise per pixel travelled — and unlike the three separate limits it replaced, it is the angle
+characters actually achieve rather than one that has to be inferred.
 
-The **Step-Down Limit** is the greatest drop a character follows rather than walking off it into a
-fall. It is deliberately *not* the same quantity as the Climb Angle: how steep a hill you can climb
-is a question about the body against the ground, while how far you step down before falling is a
-question about when a ledge becomes a fall.
+Its downward reach is how far a character follows the ground down before the ground has left it.
 
-### Blocked Move
+### Walking Off, and Being Refused
 
-A **Blocked Move** is a walk attempt the terrain refuses: the destination is solid and no rise
-within the Step-Up Limit clears it. A Blocked Move changes nothing — the character does not
-advance, does not rise, and **spends no Movement Budget**. Walking into a wall is free.
+The column ahead gives one of three answers, and the last two are **not** the same thing.
+
+A **Wall** is a column that is solid all the way up through the Step Window: there is no surface to
+step onto. The character does not advance, does not rise, and **spends no Movement Budget** —
+walking into a wall is free — and is told it cannot move.
+
+A **Cliff** is a column whose ground has fallen away past the bottom of the window. The character
+**does** advance, drops by the window, and falls. Walking off an edge is movement, not a refusal;
+treating it as one would pin characters to the tops of hills.
+
+### The Hang
+
+A character whose ground disappears does not drop immediately. It hangs briefly first, and only
+then begins to fall — which is what makes ground collapsing underfoot read as a beat rather than a
+snap. The hang is per fall: landing clears it, and so does a fresh blast, so a character shot off a
+ledge gets the same beat as one whose ground vanished.
+
+A fall **starts** at speed rather than accelerating up from zero, so the drop is legible
+immediately instead of creeping into motion.
+
+### Drift and Knockback
+
+Two different things move a falling character sideways.
+
+**Drift** is the wind, accumulated as a fraction of a pixel per moment and spent a whole pixel at a
+time. Weak wind nudges a long fall now and then rather than sliding it continuously.
+
+**Knockback** is velocity a blast imparted. A character carrying it moves sideways as it falls, and
+a character that meets a wall **stops** against it — it does not bounce off, and it does not climb
+it. Both forces die at the wall.
 
 ### Movement Budget
 
-The **Movement Budget** is the distance a character may walk during its turn, replenished each
-turn. It is spent per pixel actually advanced, so rising and falling are free and a Blocked Move
-costs nothing. Firing ends the turn, and with it any unspent budget.
+The **Movement Budget** is the number of **steps** a character may take during its turn,
+replenished each turn. A step is one pixel, taken once per simulation tick after a brief wind-up on
+the first one, so the budget is also the distance and the pace is deliberate rather than a glide.
+
+It is spent per step actually taken, so a Wall costs nothing. Firing ends the turn, and with it any
+unspent budget.
 
 **Turning is not movement** and is never charged to the budget. A character with nothing left to
 spend can still face either way, and so can always shoot in either direction.

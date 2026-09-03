@@ -81,8 +81,10 @@ export const WEAPONS: Record<number, WeaponSpec> = {
     craterRadius: 50,
     splashRadius: 40,
     maxDamage: 50,
-    // 50 dmg * 0.35 = 17.5 px/frame (clamped to TERMINAL_VELOCITY 12) on direct hit.
-    // Noticeably shoves the target across the map.
+    // 50 dmg * 0.35 = 17.5 px/tick SIDEWAYS (clamped to TERMINAL_VELOCITY 12) on a
+    // direct hit. Only the horizontal component is spent — since ADR 0004 nothing
+    // moves a character upward — so this shoves the target and drops it rather
+    // than launching it.
     knockbackScale: 0.35,
   },
   2: {

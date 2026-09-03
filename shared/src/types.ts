@@ -31,81 +31,90 @@ export const WIND_INTEGRATION = 0.35;
 // ---------------------------------------------------------------------------
 
 /**
- * Character AABB. `player.y` is the FEET (bottom edge).
+ * The DRAWN body: the rectangle the character is rendered as and the box a
+ * projectile is tested against. `player.y` is the FEET (bottom edge), so it
+ * spans [y - PLAYER_HEIGHT, y] centred on x.
  *
- * Width is the load-bearing number here. It was originally 40, derived from a
- * character radius of 20 that no longer exists, and proved far too wide. An
- * axis-aligned box probes half its width ahead, so on a slope of gradient g it
- * must lift `HALF_WIDTH * g` to
- * advance one pixel — meaning the widest climbable slope is
- * `atan(STEP_LIMIT / HALF_WIDTH)`, NOT the `atan(STEP_LIMIT / 1)` the per-pixel
- * framing suggests. The same half-width is how far the body hovers past a crest
- * before it falls. Both artifacts scale with width, which is why Hedgewars'
- * body is 18px.
+ * Since ADR 0004 this is NOT the physics body. Terrain contact is a single
+ * point — `player.(x, y)` itself — and nothing in `characterPhysics` reads
+ * these two numbers except `pointInBody`. `collapseLips` also uses the height,
+ * as a headroom test for whether a space is worth standing in.
  *
- * The two artifacts pull in opposite directions and cannot both be tuned away:
- * grounding on the highest terrain under the foot line is what lets a wide box
- * climb at all (it pre-lifts the body onto the slope), and it is also exactly
- * what makes the box hover past a crest. Narrowing the foot line relative to
- * the body was tried and rejected — it merely trades the hover for a lag
- * between the leading edge clearing a lip and the body mounting it. Narrowing
- * the BODY fixes both at once, and Phase 6's chassis tilt is what finally makes
- * the residual hover read as correct rather than broken. TUNE.
+ * The consequence is deliberate: the sprite is wider than its collision, so it
+ * clips into a steep face it stands beside. GunBound accepts this and it reads
+ * fine, because the chassis tilt sells the contact.
  */
 export const PLAYER_WIDTH = 24;
 export const PLAYER_HEIGHT = 36;
 
 /**
- * Steepest CONTINUOUS SLOPE a character can walk up, in degrees.
+ * The STEP WINDOW: how far above and below its feet a character looks for the
+ * surface one pixel ahead.
  *
- * This is the number to tune when climbing feels wrong. It is enforced
- * directly, by `tooSteepToClimb` measuring the surface as a secant across the
- * body width — not inferred from `CLIMB_LIMIT`, which cannot express it.
+ * This one pair of numbers is the whole locomotion model, replacing a
+ * CLIMB_LIMIT / STEP_LIMIT / MAX_CLIMB_ANGLE_DEG triple that existed only to
+ * reconstruct it for a body with width. GunBound's `TankMovementMaxYStepping`
+ * and `MinYStepping`, both 6.
  *
- * The two are genuinely different questions and used to be one, which is why
- * the advertised angle bore no relation to the angle characters achieved. A
- * per-step lift budget bounds how tall a STEP is, and a slope is not a step: on
- * a continuous incline the body only ever lifts `tan(angle)` per pixel
- * travelled, roughly 4px at this angle, so a 45px budget waved through cliffs
- * at 85 degrees. Bounding the slope by shrinking that budget instead would
- * forbid stepping over a 5px pebble. Measure the two separately. TUNE.
+ * `STEP_UP_LIMIT` is therefore also the climb angle: the steepest continuous
+ * slope is `atan(STEP_UP_LIMIT / 1)` ~= 80.5 degrees, and unlike the old model
+ * that is the angle characters actually achieve — there is no half-width
+ * lookahead standing between the advertised limit and the observed one. TUNE.
  */
-export const MAX_CLIMB_ANGLE_DEG = 75;
+export const STEP_UP_LIMIT = 6;
+/**
+ * The matching downward reach. A drop deeper than this is a CLIFF: the
+ * character still advances and drops by this much, and gravity takes it from
+ * there. It is not a refusal. TUNE.
+ */
+export const STEP_DOWN_LIMIT = 6;
 
-/** MAX_CLIMB_ANGLE_DEG as a gradient (rise over run). DERIVED. */
-export const MAX_CLIMB_GRADIENT = Math.tan((MAX_CLIMB_ANGLE_DEG * Math.PI) / 180);
+/** Pixels advanced per walk step. Integer on purpose — see WALK_WINDUP_MS. */
+export const WALK_STEP_PX = 1;
 
 /**
- * Greatest STEP a character may climb per 1px of horizontal travel — a ledge, a
- * crater lip, a pebble — independent of how steep the ground it is walking on
- * is. That is `MAX_CLIMB_ANGLE_DEG`'s job.
+ * Hesitation before a held direction produces its FIRST step, in ms.
  *
- * It is the transient lift needed to get the leading edge over an obstacle, not
- * the height gained per step, which is why it is so much larger than a stride:
- * an axis-aligned body probes HALF_WIDTH ahead. Sized a little above the body's
- * own height so a character can climb out of a crater it fell into. TUNE.
+ * A wind-up, not a per-step cost. GunBound accumulates `sidewaysDelayTimer`
+ * and never resets it after a successful step — only when the key is released
+ * — so pressing a direction gives 100ms of nothing followed by a steady
+ * 1px/frame crawl. Reading it as a per-step delay instead yields a 10px/s
+ * character, which is the trap worth naming here. TUNE.
  */
-export const CLIMB_LIMIT = 45;
+export const WALK_WINDUP_MS = 100;
 
 /**
- * Greatest drop a character will follow rather than walk off into a fall, and
- * the furthest a landing body snaps down to the surface.
+ * Steps a character may take per turn, replenished each turn. The unit is
+ * STEPS, and a step is `WALK_STEP_PX`, so at the default it is also pixels.
  *
- * Deliberately NOT the same as CLIMB_LIMIT. Climbing is limited by the body's
- * geometry against a slope; stepping down is a gameplay choice about when a
- * ledge becomes a fall. Sharing one constant meant a steeper climb also glided
- * the body down large drops instead of dropping it. TUNE.
+ * GunBound gives each mobile 90-100. Ours was 250px at double the pace, which
+ * is a large part of why walking read as slidey rather than deliberate. TUNE.
  */
-export const STEP_LIMIT = 20;
+export const MOVE_STEPS = 100;
 
-/** Ground probes spread across the foot line; highest ground wins. */
-export const FOOT_SAMPLES = 5;
+/**
+ * How long a character hangs before gravity engages, in ms. What makes ground
+ * collapsing underfoot read as a beat rather than a snap.
+ * GunBound's `TankMovementGravityDelay`. TUNE.
+ */
+export const FALL_DELAY_MS = 50;
+/** Speed a fall starts at, px/tick. GunBound's `TankMovementInitialGravity`. */
+export const FALL_INITIAL_SPEED = 3;
+/** Fall acceleration, px/tick^2. GunBound's `TankMovementGravityFactor`. */
+export const FALL_ACCEL = 0.15;
 
+/**
+ * Divides the wind acceleration into a per-tick drift for a FALLING character.
+ * The accumulator is clamped to +/-1 and applied as whole pixels, so weak wind
+ * nudges a long fall by a pixel now and then rather than sliding it. TUNE.
+ */
+export const WIND_DRIFT_DIVISOR = 45;
 
-/** Pixels a character may walk per turn, replenished each turn. TUNE. */
-export const MOVE_BUDGET = 250;
-/** Walking pace in px/sec. TUNE. */
-export const WALK_SPEED = 120;
+/**
+ * Bound on the lift that frees a contact point with terrain drawn over it (a
+ * `rect` op, or a map that loads a character inside a hill).
+ */
+export const EJECT_UP_LIMIT = 32;
 
 /** Per-frame speed clamp, both axes, for falling characters. TUNE. */
 export const TERMINAL_VELOCITY = 12;
@@ -155,10 +164,3 @@ export const TILT_WINDOW_Y = 25;
 /** Aim limits, in degrees, measured RELATIVE TO THE CHASSIS. See ADR 0003. */
 export const AIM_MIN_DEG = -20;
 export const AIM_MAX_DEG = 90;
-
-/** Airborne graduated climb: try lifting 1..N px before bouncing off a wall. */
-export const AIRBORNE_CLIMB_MAX = 5;
-/** Speed multiplier applied per pixel climbed while airborne. */
-export const AIRBORNE_CLIMB_DAMP = [0.96, 0.93, 0.9, 0.87, 0.84];
-/** Horizontal restitution when an airborne character hits a true wall. TUNE. */
-export const WALL_ELASTICITY = 0.4;

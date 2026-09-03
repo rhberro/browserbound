@@ -1,5 +1,16 @@
 # Implementation Plan: Movement, Collision & Terrain Destruction
 
+> **Partly superseded.** Phases 2 (character body and terrain probes), 3 (locomotion) and 4
+> (airborne physics) were replaced by
+> `implementation-plan-point-contact-movement.md`, which swaps the swept AABB for a single contact
+> point (ADR 0004). The constants those phases introduced — `CLIMB_LIMIT`, `STEP_LIMIT`,
+> `MAX_CLIMB_ANGLE_DEG`, `FOOT_SAMPLES`, `AIRBORNE_CLIMB_MAX`, `AIRBORNE_CLIMB_DAMP`,
+> `WALL_ELASTICITY` — no longer exist.
+>
+> Kept deliberately rather than deleted: Phases 1, 5, 6 and 7 (terrain, weapons and splash, chassis
+> tilt, netcode) are still the live reference, and the post-mortems throughout are the record of
+> why the box model was tried and what each of its fixes was for.
+
 Derived from a design review against Worms Armageddon, Hedgewars and GunBound/OpenBound.
 Domain terms are defined in the root `CONTEXT.md`. Decisions are recorded in
 `docs/adr/0002-terrain-representation.md` and `docs/adr/0003-chassis-relative-aim.md`.
