@@ -12,7 +12,7 @@ import {
 import { PhysicsAdapter, Wind } from '@browserbond/shared/src/adapters/PhysicsAdapter';
 import { MessageValidationAdapter } from '@browserbond/shared/src/adapters/MessageValidationAdapter';
 import { WindManager } from '../adapters/WindManager';
-import { shouldAdvanceTurn } from './turnLoop';
+import { shouldAdvanceTurn, nothingInFlight } from './turnLoop';
 import { loadMap, loadRandomMap, LoadedMap } from '../adapters/MapLoader';
 import {
   getWeapon,
@@ -215,6 +215,20 @@ export class GameRoom extends Room<RoomState> {
     });
   }
 
+  /**
+   * Nothing airborne and nothing staged to fire.
+   *
+   * Shared with shouldAdvanceTurn so the two places that ask "is the shot
+   * over?" cannot drift — the staged term is exactly the one that went missing
+   * and let Burst fire into the next player's turn.
+   */
+  private nothingInFlight(): boolean {
+    return nothingInFlight({
+      active: this.projectiles.length,
+      pending: this.pendingProjectiles.length,
+    });
+  }
+
   private isSolidAt(x: number, y: number): boolean {
     const ix = Math.floor(x);
     const iy = Math.floor(y);
@@ -259,6 +273,11 @@ export class GameRoom extends Room<RoomState> {
 
     // Check collisions
     const projectilesToRemove: string[] = [];
+    // Whose turn it was BEFORE any of this frame's deaths. killPlayer hands the
+    // turn to a survivor immediately, and without this the advance check below
+    // would then fire as well and skip the turn it had just begun — reachable
+    // by killing yourself with your own splash.
+    const turnOwnerBeforeCollisions = this.state.currentPlayerId;
 
     for (const proj of this.projectiles) {
       const prevX = proj.x - proj.vx;
@@ -350,7 +369,9 @@ export class GameRoom extends Room<RoomState> {
           const dmg = splashDamage(dist, weapon.splashRadius, weapon.maxDamage);
           if (dmg <= 0) continue;
 
-          player.health -= dmg;
+          // Clamped: this value is broadcast, and a character killed by a
+          // large blast would otherwise be reported at negative health.
+          player.health = Math.max(0, player.health - dmg);
           affectedPlayers.push(playerId);
 
           // Apply knockback
@@ -400,6 +421,7 @@ export class GameRoom extends Room<RoomState> {
     // Pass the turn only once nothing is airborne AND nothing is still staged
     // to fire. See shouldAdvanceTurn for why the staged term matters.
     if (
+      this.state.currentPlayerId === turnOwnerBeforeCollisions &&
       shouldAdvanceTurn({
         active: this.projectiles.length,
         pending: this.pendingProjectiles.length,
@@ -415,8 +437,7 @@ export class GameRoom extends Room<RoomState> {
     // dropped connection triggers it.
     if (
       this.state.currentPlayerId &&
-      this.projectiles.length === 0 &&
-      this.pendingProjectiles.length === 0 &&
+      this.nothingInFlight() &&
       this.state.turnEndsAt > 0 &&
       Date.now() > this.state.turnEndsAt
     ) {

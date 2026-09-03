@@ -136,6 +136,21 @@ A roof is only collapsed when it is *both* thin *and* over an unusable space. A 
 thin roof with room to walk under it, is a cave and survives — caves are the reason terrain is
 recorded per pixel at all.
 
+### Character Body
+
+The **Character Body** is the rectangle the simulation moves: a fixed width and height, centred
+horizontally on the character's position and standing *on* it — the position is the **feet**, not
+the centre. Everything that asks "where is this character?" asks about this box: walking, wall
+tests, ground finding, and projectile hits.
+
+Projectiles are tested against it directly. A shot at head height therefore registers, and a shot
+passing below the feet, inside the ground, does not. It was previously a circle centred on the feet,
+which got both of those backwards.
+
+The body is **axis-aligned regardless of Chassis Tilt**. Tilt is what the character is drawn at and
+what its shot obeys; it does not rotate the box the physics moves, and the collision test must agree
+with the box, not the drawing.
+
 ### Climb Angle
 
 The **Climb Angle** is the steepest slope a character can walk up. It is the game's definition of

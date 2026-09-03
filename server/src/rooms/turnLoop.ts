@@ -29,5 +29,10 @@ export interface ProjectileCounts {
  * would pass the instant it began.
  */
 export function shouldAdvanceTurn(counts: ProjectileCounts): boolean {
-  return counts.active === 0 && counts.pending === 0 && counts.resolvedThisFrame > 0;
+  return nothingInFlight(counts) && counts.resolvedThisFrame > 0;
+}
+
+/** Nothing airborne and nothing staged. The turn timer asks the same question. */
+export function nothingInFlight(counts: Pick<ProjectileCounts, 'active' | 'pending'>): boolean {
+  return counts.active === 0 && counts.pending === 0;
 }

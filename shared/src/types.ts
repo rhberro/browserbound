@@ -38,9 +38,10 @@ export const WIND_INTEGRATION = 0.35;
 /**
  * Character AABB. `player.y` is the FEET (bottom edge).
  *
- * Width is the load-bearing number here, and it was originally 40 (derived from
- * a since-removed 20px character radius) which proved far too wide. An axis-aligned box probes half its
- * width ahead, so on a slope of gradient g it must lift `HALF_WIDTH * g` to
+ * Width is the load-bearing number here. It was originally 40, derived from a
+ * character radius of 20 that no longer exists, and proved far too wide. An
+ * axis-aligned box probes half its width ahead, so on a slope of gradient g it
+ * must lift `HALF_WIDTH * g` to
  * advance one pixel — meaning the widest climbable slope is
  * `atan(STEP_LIMIT / HALF_WIDTH)`, NOT the `atan(STEP_LIMIT / 1)` the per-pixel
  * framing suggests. The same half-width is how far the body hovers past a crest

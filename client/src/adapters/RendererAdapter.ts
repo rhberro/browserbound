@@ -54,6 +54,20 @@ function buildArrow(graphics: PIXI.Graphics, length: number, width: number, colo
   graphics.stroke({ width, color });
 }
 
+/** The scene-graph objects belonging to one character. */
+interface PlayerSprite {
+  /** Root, positioned at the character's FEET. */
+  root: PIXI.Container;
+  /** The body. The only part that rotates with chassis tilt. */
+  chassis: PIXI.Graphics;
+  /** Health fill. Redrawn only when `health` below changes. */
+  healthBar: PIXI.Graphics;
+  /** Health the bar was last drawn at, so unchanged bars are not rebuilt. */
+  health: number;
+  /** Aim arrow, present only while this character holds the turn. */
+  angleIndicator: PIXI.Graphics | null;
+}
+
 interface DeathExplosion {
   graphics: PIXI.Graphics;
   x: number;
@@ -65,10 +79,16 @@ interface DeathExplosion {
 
 export class RendererAdapter {
   private container: PIXI.Container;
-  private playerSprites: Map<string, PIXI.Container> = new Map();
-  /** Last health each bar was drawn at, so unchanged bars are not rebuilt. */
-  private lastHealth: Map<string, number> = new Map();
-  private angleIndicators: Map<string, PIXI.Graphics> = new Map();
+  /**
+   * Everything owned per character, in ONE record.
+   *
+   * These were three parallel playerId-keyed maps that had to be inserted into
+   * and deleted from in lockstep, and the lockstep was already broken once —
+   * the aim arrow was detached without being destroyed on the removal path
+   * while the identical object was destroyed on the other. A record cannot
+   * drift from itself, and `releaseSprite` is the single teardown.
+   */
+  private playerSprites: Map<string, PlayerSprite> = new Map();
   private terrain: TerrainSurface;
   private motion: PlayerMotion = new PlayerMotion();
   private lastFrameTime: number = performance.now();
@@ -123,19 +143,9 @@ export class RendererAdapter {
     this.localPlayerId = gameState.getRoomSessionId();
 
     // Remove sprites for players that no longer exist
-    for (const [playerId, sprite] of this.playerSprites) {
+    for (const playerId of [...this.playerSprites.keys()]) {
       if (!gameState.players.has(playerId)) {
-        this.container.removeChild(sprite);
-        sprite.destroy({ children: true });
-        this.playerSprites.delete(playerId);
-        this.lastHealth.delete(playerId);
-        this.motion.remove(playerId);
-
-        const angleInd = this.angleIndicators.get(playerId);
-        if (angleInd) {
-          this.container.removeChild(angleInd);
-          this.angleIndicators.delete(playerId);
-        }
+        this.releaseSprite(playerId);
       }
     }
 
@@ -147,28 +157,28 @@ export class RendererAdapter {
         sprite = this.createPlayerSprite(playerId, gameState);
         this.playerSprites.set(playerId, sprite);
       }
+      const root = sprite.root;
 
       // Update position: the local player is smoothed with no delay, remote
       // players are interpolated ~2 patches in the past (see PlayerMotion).
       const isLocal = playerId === this.localPlayerId;
       const pos = this.motion.update(playerId, player.x, player.y, isLocal, dtMs, now);
-      sprite.x = pos.x;
-      sprite.y = pos.y;
+      root.x = pos.x;
+      root.y = pos.y;
 
       // A character whose player is mid-reconnect must not read as idle. It
       // stays on the field — the server is still holding its turn and budget —
       // but pulses translucent so the opponent can tell the difference between
       // someone thinking and someone whose connection dropped.
-      sprite.alpha = player.connected === false ? 0.35 + 0.25 * Math.sin(now / 200) : 1;
+      root.alpha = player.connected === false ? 0.35 + 0.25 * Math.sin(now / 200) : 1;
 
       // ADR 0003 rejected cosmetic tilt in the other direction too: a chassis
       // that does not visibly lean while the shot obeys the slope is just as
       // much a lie as a shot that ignores a visible lean. Only the chassis
       // rotates — the health bars stay level.
-      const chassis = sprite.getChildByName('chassis') as PIXI.Graphics | null;
-      if (chassis) chassis.rotation = player.tilt;
+      sprite.chassis.rotation = player.tilt;
 
-      this.updateHealthBar(playerId, sprite, player.health);
+      this.updateHealthBar(sprite, player.health);
 
       // Draw angle indicator for current player
       this.updateAngleIndicator(playerId, player, gameState, aimState);
@@ -178,9 +188,9 @@ export class RendererAdapter {
   /**
    * Create a player sprite with health bar.
    */
-  private createPlayerSprite(playerId: string, gameState: GameState): PIXI.Container {
-    const container = new PIXI.Container();
-    container.name = `player_${playerId}`;
+  private createPlayerSprite(playerId: string, gameState: GameState): PlayerSprite {
+    const root = new PIXI.Container();
+    root.label = `player_${playerId}`;
 
     // The chassis, drawn as the body the physics actually simulates: the
     // container's origin is the FEET, matching player.y, so the box rises from
@@ -190,13 +200,11 @@ export class RendererAdapter {
     const chassis = new PIXI.Graphics();
     chassis.rect(-PLAYER_WIDTH / 2, -PLAYER_HEIGHT, PLAYER_WIDTH, PLAYER_HEIGHT);
     chassis.fill(playerId === gameState.getRoomSessionId() ? 0xff0000 : 0x0000ff);
-    chassis.name = 'chassis';
-    container.addChild(chassis);
+    root.addChild(chassis);
 
     // Health bars ride ABOVE the body and outside the rotating chassis, so
     // they stay level and readable however far the character leans.
     const bars = new PIXI.Container();
-    bars.name = 'healthBars';
     bars.y = -PLAYER_HEIGHT - HEALTH_BAR_GAP;
 
     const healthBg = new PIXI.Graphics();
@@ -204,13 +212,36 @@ export class RendererAdapter {
     healthBg.fill(0x333333);
     bars.addChild(healthBg);
 
-    const health = new PIXI.Graphics();
-    health.name = 'healthBar';
-    bars.addChild(health);
+    const healthBar = new PIXI.Graphics();
+    bars.addChild(healthBar);
 
-    container.addChild(bars);
-    this.container.addChild(container);
-    return container;
+    root.addChild(bars);
+    this.container.addChild(root);
+
+    // health starts at NaN so the first updateHealthBar always draws.
+    return { root, chassis, healthBar, health: NaN, angleIndicator: null };
+  }
+
+  /**
+   * Tear down everything belonging to one character.
+   *
+   * The single teardown path, so no part of a departing character can be
+   * detached-but-not-destroyed while a sibling is destroyed correctly.
+   */
+  private releaseSprite(playerId: string): void {
+    const sprite = this.playerSprites.get(playerId);
+    if (!sprite) return;
+
+    this.container.removeChild(sprite.root);
+    sprite.root.destroy({ children: true });
+
+    if (sprite.angleIndicator) {
+      this.container.removeChild(sprite.angleIndicator);
+      sprite.angleIndicator.destroy();
+    }
+
+    this.playerSprites.delete(playerId);
+    this.motion.remove(playerId);
   }
 
   /**
@@ -223,37 +254,36 @@ export class RendererAdapter {
     aimState?: AimState
   ): void {
     const isCurrentPlayer = playerId === gameState.turnState?.currentPlayerId;
+    const sprite = this.playerSprites.get(playerId);
+    if (!sprite) return;
 
-    if (isCurrentPlayer) {
-      let angleInd = this.angleIndicators.get(playerId);
-      if (!angleInd) {
-        angleInd = new PIXI.Graphics();
-        buildArrow(angleInd, AIM_ARROW_LENGTH, 3, 0xffff00);
-        this.container.addChild(angleInd);
-        this.angleIndicators.set(playerId, angleInd);
+    if (!isCurrentPlayer) {
+      if (sprite.angleIndicator) {
+        this.container.removeChild(sprite.angleIndicator);
+        sprite.angleIndicator.destroy();
+        sprite.angleIndicator = null;
       }
-
-      // The arrow's GEOMETRY never changes — only where it points. It is
-      // built once, along +x, and thereafter moved and rotated. Transform
-      // changes are exactly what PixiJS exempts from the don't-rebuild rule.
-      const radians = this.aimDirection(playerId, player, aimState);
-
-      // Anchor to the rendered (interpolated) position so the arrow tracks the
-      // sprite instead of the raw server position it is smoothing toward.
-      const pos = this.motion.getRendered(playerId) ?? { x: player.x, y: player.y };
-      angleInd.x = pos.x;
-      angleInd.y = pos.y;
-      // Firing angles are y-up and Pixi rotation is y-down, so the screen
-      // rotation is the negation. Same trap as the tilt sign in worldFiringAngle.
-      angleInd.rotation = -radians;
-    } else {
-      const angleInd = this.angleIndicators.get(playerId);
-      if (angleInd) {
-        this.container.removeChild(angleInd);
-        angleInd.destroy();
-        this.angleIndicators.delete(playerId);
-      }
+      return;
     }
+
+    if (!sprite.angleIndicator) {
+      // The arrow's GEOMETRY never changes — only where it points. It is built
+      // once, along +x, and thereafter moved and rotated. Transform changes are
+      // exactly what PixiJS exempts from the don't-rebuild rule.
+      const arrow = new PIXI.Graphics();
+      buildArrow(arrow, AIM_ARROW_LENGTH, 3, 0xffff00);
+      this.container.addChild(arrow);
+      sprite.angleIndicator = arrow;
+    }
+
+    // Anchor to the rendered (interpolated) position so the arrow tracks the
+    // sprite instead of the raw server position it is smoothing toward.
+    const pos = this.motion.getRendered(playerId) ?? { x: player.x, y: player.y };
+    sprite.angleIndicator.x = pos.x;
+    sprite.angleIndicator.y = pos.y;
+    // Firing angles are y-up and Pixi rotation is y-down, so the screen
+    // rotation is the negation. Same trap as the tilt sign in worldFiringAngle.
+    sprite.angleIndicator.rotation = -this.aimDirection(playerId, player, aimState);
   }
 
   /**
@@ -264,14 +294,11 @@ export class RendererAdapter {
    * re-triangulated 60 times a second regardless. PixiJS names rebuilding
    * unchanged geometry explicitly as the thing not to do.
    */
-  private updateHealthBar(playerId: string, sprite: PIXI.Container, health: number): void {
-    if (this.lastHealth.get(playerId) === health) return;
-    this.lastHealth.set(playerId, health);
+  private updateHealthBar(sprite: PlayerSprite, health: number): void {
+    if (sprite.health === health) return;
+    sprite.health = health;
 
-    const bars = sprite.getChildByName('healthBars') as PIXI.Container | null;
-    const bar = bars?.getChildByName('healthBar') as PIXI.Graphics | null;
-    if (!bar) return;
-
+    const bar = sprite.healthBar;
     const fraction = Math.max(0, Math.min(1, health / 100));
     bar.clear();
     bar.rect(

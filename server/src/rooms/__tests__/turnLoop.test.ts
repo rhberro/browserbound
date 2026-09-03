@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { shouldAdvanceTurn } from '../turnLoop';
+import { shouldAdvanceTurn, nothingInFlight } from '../turnLoop';
 
 describe('shouldAdvanceTurn', () => {
   it('passes the turn when the last projectile of a volley resolves', () => {
@@ -35,5 +35,26 @@ describe('shouldAdvanceTurn', () => {
     // Without the resolvedThisFrame term this is the state of EVERY frame of a
     // turn in which nobody has fired, and the turn would pass instantly.
     expect(shouldAdvanceTurn({ active: 0, pending: 0, resolvedThisFrame: 0 })).toBe(false);
+  });
+});
+
+describe('nothingInFlight', () => {
+  it('is true only when nothing is airborne and nothing is staged', () => {
+    expect(nothingInFlight({ active: 0, pending: 0 })).toBe(true);
+    expect(nothingInFlight({ active: 1, pending: 0 })).toBe(false);
+    expect(nothingInFlight({ active: 0, pending: 1 })).toBe(false);
+  });
+
+  it('is the same question shouldAdvanceTurn asks, minus the edge', () => {
+    // The turn timer and the turn-advance check must never disagree about
+    // whether a shot is over. Sharing this predicate is what stops the staged
+    // term going missing from one of them again.
+    for (const active of [0, 1]) {
+      for (const pending of [0, 1]) {
+        expect(shouldAdvanceTurn({ active, pending, resolvedThisFrame: 1 })).toBe(
+          nothingInFlight({ active, pending })
+        );
+      }
+    }
   });
 });
