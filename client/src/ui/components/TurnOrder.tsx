@@ -1,24 +1,26 @@
 import { turnOrder } from '../signals';
 
 /**
- * The Delay board: who acts next, and what each player's accumulated turn cost
- * is. Leftmost is next; the current turn is highlighted and your own chip is
- * tinted. This is the visible half of the Delay system — a player cannot plan
- * around tempo they cannot see.
+ * The Delay board — Variant 2: sharp angular chips, the current turn rimmed in
+ * cyan with a glow. Leftmost acts next; your own chip is tinted.
  */
 export function TurnOrder() {
   return (
-    <div class="flex items-center gap-1.5">
+    <div class="pointer-events-auto flex items-center gap-1.5">
       {turnOrder.value.map((entry) => (
         <span
           key={entry.label}
           class={[
-            'rounded px-2 py-0.5 text-[11px] leading-none',
-            entry.isCurrent ? 'bg-white/25 font-semibold' : 'bg-black/25',
-            entry.isYou ? 'text-emerald-200' : 'text-white/80',
+            'flex items-center gap-1.5 border px-2.5 py-1 text-[11px] leading-none',
+            entry.isCurrent
+              ? 'border-accent bg-accent/10 font-bold shadow-[0_0_12px_rgba(34,211,238,0.35)]'
+              : 'border-neutral-700 bg-black/30',
+            entry.isYou ? 'text-accent-300' : 'text-white/70',
           ].join(' ')}
         >
-          {entry.label} · {Math.round(entry.delay)}
+          <span class={['h-1.5 w-3', entry.isCurrent ? 'bg-accent' : 'bg-neutral-600'].join(' ')} />
+          {entry.label}
+          <span class="tabular-nums text-neutral-400">{Math.round(entry.delay)}</span>
         </span>
       ))}
     </div>

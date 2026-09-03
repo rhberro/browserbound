@@ -3,11 +3,10 @@ import { isCharging, isMyTurn } from '../signals';
 import { useInput } from '../InputContext';
 
 /**
- * Hold to charge, release to fire — the pointer equivalent of holding Space.
+ * Hold to charge, release to fire — Variant 2: a glowing cyan FIRE plate.
  *
  * The pointer is captured on press so the release always lands here even if the
- * cursor drifts off the button mid-charge; without it a player who slid off
- * would be stuck charging forever.
+ * cursor drifts off the button mid-charge.
  */
 export function FireButton() {
   const input = useInput();
@@ -39,11 +38,11 @@ export function FireButton() {
         onPointerUp={release}
         onPointerCancel={release}
         class={
-          'rounded-lg border-2 border-accent px-8 py-3.5 text-[15px] font-semibold text-accent ' +
+          'border-2 border-accent px-8 py-3.5 text-[15px] font-black text-accent ' +
           'select-none touch-none transition-shadow duration-100 ease-out ' +
           'hover:bg-accent/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent ' +
           'disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent ' +
-          (charging ? 'shadow-[0_0_20px_rgba(145,132,217,0.8),inset_0_0_10px_rgba(145,132,217,0.3)]' : '')
+          (charging ? 'shadow-[0_0_24px_rgba(34,211,238,0.85),inset_0_0_12px_rgba(34,211,238,0.35)]' : '')
         }
       >
         FIRE

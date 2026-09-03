@@ -12,39 +12,51 @@ import { deckStateClass } from './signals';
 import type { GameState } from '../gameState';
 
 /**
- * The HUD overlay: a status pill along the top and the control deck along the
- * bottom, floating over the game canvas.
+ * The HUD overlay — Variant 2 "Neon Tech".
+ *
+ * A top band (turn order left, clock centre, wind right) and two floating
+ * glass panels along the bottom: an aim cluster (angle + power) on the left,
+ * an action cluster (move + weapon + fire) on the right.
  *
  * The layer itself is inert (`#hud` is pointer-events:none in index.html);
- * only the pill and the deck opt back in, so clicks anywhere else reach the
- * canvas underneath.
+ * only the panels opt back in, so clicks anywhere else reach the canvas.
  */
 export function HudRoot({ gameState }: { gameState: GameState }) {
   return (
-    <div class="relative flex h-full flex-col justify-between">
+    <div class="relative flex h-full flex-col">
       <MatchResult gameState={gameState} />
 
-      <div>
-        <WindDial />
+      <div class="pointer-events-none flex items-start justify-between px-5 pt-4">
         <TurnOrder />
-        <ConnectionBanner />
+        <div class="flex flex-col items-center gap-2">
+          <TurnClock />
+          <ConnectionBanner />
+        </div>
+        <WindDial />
       </div>
 
-      <div class="pointer-events-none flex justify-center px-4 pb-6">
-        <div class={deckStateClass}>
-          <div class="hud-panel pointer-events-auto flex flex-wrap items-end justify-center gap-x-8 gap-y-5 rounded-xl px-8 py-5 shadow-lg shadow-black/50">
-            <AngleControl />
-            <PowerBar />
-            <MovementBudget />
-            <TurnClock />
-            <WeaponSelector />
-            <FireButton />
+      <div class="pointer-events-none mt-auto flex flex-col items-center gap-2 px-5 pb-5">
+        <div class="flex w-full items-end justify-between gap-4">
+          <div class={deckStateClass}>
+            <div class="hud-panel pointer-events-auto flex items-center gap-5 rounded-lg px-5 py-4">
+              <AngleControl />
+              <div class="h-px w-8 bg-accent/30" />
+              <PowerBar />
+            </div>
           </div>
 
-          <p class="mt-2 text-center text-[10px] text-neutral-600">
-            ↑/↓ angle · A/D move · 1-3 weapon · hold Space to fire
-          </p>
+          <div class={deckStateClass}>
+            <div class="hud-panel pointer-events-auto flex items-center gap-5 rounded-lg px-5 py-4">
+              <MovementBudget />
+              <WeaponSelector />
+              <FireButton />
+            </div>
+          </div>
         </div>
+
+        <p class="text-[10px] text-neutral-500">
+          ↑/↓ angle · A/D move · 1-3 weapon · hold Space to fire
+        </p>
       </div>
     </div>
   );
