@@ -173,7 +173,7 @@ export class GameRoom extends Room {
       const player = this.state.players.get(client.sessionId);
       if (!player) return;
 
-      // Clamp chassis-relative aim angle to valid range (in degrees, convert to radians)
+      // Clamp world-absolute aim angle to valid range (in degrees, convert to radians)
       player.aimAngle = degToRad(clampAimDeg(data.angle));
     });
 
@@ -201,7 +201,7 @@ export class GameRoom extends Room {
 
       // The server owns the firing direction end to end. The client sends no
       // angle at all — it draws its aim line through this same function.
-      const worldAngle = worldFiringAngle(player);
+      const worldAngle = worldFiringAngle({ aimAngle: player.aimAngle, facing: player.facing });
 
       const projectileSpecs = generateProjectileSpecs(weaponType, worldAngle);
 
@@ -864,10 +864,10 @@ export class GameRoom extends Room {
     const player = this.state.players.get(playerId);
     if (player) {
       player.movementBudget = MOVE_STEPS;
-      // Aim is NOT reset. ADR 0003 makes the chassis-relative measurement the
-      // thing that stays put, and zeroing it here put the server at 0 while
-      // the client's HUD and aim line still read whatever the player had
-      // dialled in — a silent disagreement about where the shot goes.
+      // Aim is NOT reset. Aim is world-absolute and stays put between turns,
+      // and zeroing it here put the server at 0 while the client's HUD and aim
+      // line still read whatever the player had dialled in — a silent
+      // disagreement about where the shot goes.
     }
     this.turnEndsAtMs = Date.now() + TURN_TIME_MS;
     this.publishTurnClock();

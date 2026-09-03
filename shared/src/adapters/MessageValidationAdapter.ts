@@ -15,10 +15,10 @@ export interface ValidationResult {
 
 /**
  * No angle. The firing direction is derived on the server from the character's
- * chassis tilt, its stored aim angle and its facing (see `worldFiringAngle`);
- * a client-supplied angle was accepted, range-checked and then ignored. Worse,
- * the range check was [0, PI], which would have rejected the twenty degrees
- * below the horizontal that ADR 0003's aim range permits.
+ * stored aim angle and its facing (see `worldFiringAngle`); a client-supplied
+ * angle was accepted, range-checked and then ignored. Worse, the range check
+ * was [0, PI], which would have rejected the twenty degrees below the
+ * horizontal that the aim range permits.
  */
 interface FireMessage {
   power: number;

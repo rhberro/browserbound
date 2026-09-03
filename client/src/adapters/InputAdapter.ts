@@ -20,13 +20,12 @@ const CHARGE_RATE_PER_SECOND = 40;
 
 export interface AimState {
   /**
-   * Chassis-relative aim in DEGREES — the unit the player dials in, the unit
+   * World-absolute aim in DEGREES — the unit the player dials in, the unit
    * the HUD shows, and the unit the server's aim message expects.
    *
-   * Named for its unit on purpose. It was called `angle`, and the aim line read
-   * it as radians and added it to a tilt that really was radians; the result
-   * looked plausible near the default aim, which is why it survived. Anything
-   * that needs a direction converts once, at the point of use.
+   * Named for its unit on purpose: it was once called `angle` and misread as
+   * radians at the point of use. Anything that needs a direction converts once,
+   * at the point of use.
    */
   angleDeg: number;
   power: number;
@@ -37,7 +36,7 @@ export class InputAdapter {
   private keys: Map<string, boolean> = new Map();
   private isCharging: boolean = false;
   private aimPower: number = 0;
-  /** Chassis-relative aim in degrees; see AimState.angleDeg. */
+  /** World-absolute aim in degrees; see AimState.angleDeg. */
   private aimAngleDeg: number = 45;
   private selectedWeapon: number = 1; // 1 = normal, 2 = burst, 3 = shotgun
   private lastMoveUpdate: number = 0;

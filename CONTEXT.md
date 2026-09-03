@@ -269,14 +269,15 @@ line between the ground found under its left edge and under its right edge. A ch
 has no tilt. Tilt reads the ground far more generously than walking does, so a character tilts to
 terrain it could never climb.
 
-### Chassis-Relative Aim
+### World-Absolute Aim
 
-Aim is measured **against the Chassis**, not against the world. The ground a character stands on
-therefore changes where its shot goes. When Chassis Tilt changes, the aim measurement is preserved
-and the real-world direction moves with the chassis.
+Aim is measured **from the horizontal**, not against the chassis. The number the HUD shows is the
+angle above the horizontal in the direction the character faces, so the same 45° means the same
+shot on a plateau or a crater rim. Chassis Tilt is purely visual: the body and its oriented hitbox
+still lean with the slope, but the tilt does not enter the firing direction.
 
-Aim is confined to a fixed range relative to the chassis. Terrain that tilts a character far enough
-can press its aim against that limit, denying shots that would be available on level ground.
+Aim is confined to a fixed world-absolute range — the same on any slope, and never pressed against
+a limit by terrain the way chassis-relative aim was. Firing is never blocked by tilt.
 
 ### Reconnection Window
 
