@@ -28,6 +28,32 @@ const HEALTH_BAR_WIDTH = 40;
 const HEALTH_BAR_HEIGHT = 6;
 const HEALTH_BAR_GAP = 8;
 
+/** Radius the impact flash reaches at the end of its animation, in pixels. */
+const EXPLOSION_MAX_RADIUS = 40;
+
+/** Length of the on-character aim arrow, in pixels. */
+const AIM_ARROW_LENGTH = 35;
+
+/**
+ * Draw an arrow of fixed length pointing along +x, from the origin.
+ *
+ * Called ONCE per indicator. Direction and position are then transforms on the
+ * resulting object, so the geometry is never re-triangulated.
+ */
+function buildArrow(graphics: PIXI.Graphics, length: number, width: number, color: number): void {
+  graphics.moveTo(0, 0);
+  graphics.lineTo(length, 0);
+  graphics.stroke({ width, color });
+
+  const head = 8;
+  const spread = (Math.PI * 5) / 6;
+  for (const a of [spread, -spread]) {
+    graphics.moveTo(length, 0);
+    graphics.lineTo(length + Math.cos(a) * head, -Math.sin(a) * head);
+  }
+  graphics.stroke({ width, color });
+}
+
 interface DeathExplosion {
   graphics: PIXI.Graphics;
   x: number;
@@ -202,21 +228,29 @@ export class RendererAdapter {
       let angleInd = this.angleIndicators.get(playerId);
       if (!angleInd) {
         angleInd = new PIXI.Graphics();
+        buildArrow(angleInd, AIM_ARROW_LENGTH, 3, 0xffff00);
         this.container.addChild(angleInd);
         this.angleIndicators.set(playerId, angleInd);
       }
 
-      angleInd.clear();
+      // The arrow's GEOMETRY never changes — only where it points. It is
+      // built once, along +x, and thereafter moved and rotated. Transform
+      // changes are exactly what PixiJS exempts from the don't-rebuild rule.
       const radians = this.aimDirection(playerId, player, aimState);
 
       // Anchor to the rendered (interpolated) position so the arrow tracks the
       // sprite instead of the raw server position it is smoothing toward.
       const pos = this.motion.getRendered(playerId) ?? { x: player.x, y: player.y };
-      this.drawArrow(angleInd, pos.x, pos.y, radians, 35, 3, 0xffff00);
+      angleInd.x = pos.x;
+      angleInd.y = pos.y;
+      // Firing angles are y-up and Pixi rotation is y-down, so the screen
+      // rotation is the negation. Same trap as the tilt sign in worldFiringAngle.
+      angleInd.rotation = -radians;
     } else {
       const angleInd = this.angleIndicators.get(playerId);
       if (angleInd) {
         this.container.removeChild(angleInd);
+        angleInd.destroy();
         this.angleIndicators.delete(playerId);
       }
     }
@@ -250,36 +284,6 @@ export class RendererAdapter {
   }
 
   /**
-   * Draw an arrow line with arrowhead.
-   */
-  private drawArrow(
-    graphics: PIXI.Graphics,
-    x: number,
-    y: number,
-    radians: number,
-    length: number,
-    width: number,
-    color: number
-  ): void {
-    const endX = x + Math.cos(radians) * length;
-    const endY = y - Math.sin(radians) * length;
-
-    graphics.moveTo(x, y);
-    graphics.lineTo(endX, endY);
-    graphics.stroke({ width, color });
-
-    // Arrowhead
-    const arrowHeadSize = 8;
-    const angle1 = radians + (Math.PI * 5) / 6;
-    const angle2 = radians - (Math.PI * 5) / 6;
-    graphics.moveTo(endX, endY);
-    graphics.lineTo(endX + Math.cos(angle1) * arrowHeadSize, endY - Math.sin(angle1) * arrowHeadSize);
-    graphics.moveTo(endX, endY);
-    graphics.lineTo(endX + Math.cos(angle2) * arrowHeadSize, endY - Math.sin(angle2) * arrowHeadSize);
-    graphics.stroke({ width, color });
-  }
-
-  /**
    * Update projectile graphics.
    */
   updateProjectiles(gameState: GameState): void {
@@ -287,6 +291,7 @@ export class RendererAdapter {
     for (const [projId, graphics] of this.projectileGraphicsMap) {
       if (!gameState.projectiles.has(projId)) {
         this.container.removeChild(graphics);
+        graphics.destroy();
         this.projectileGraphicsMap.delete(projId);
       }
     }
@@ -296,14 +301,15 @@ export class RendererAdapter {
       let graphics = this.projectileGraphicsMap.get(projId);
 
       if (!graphics) {
+        // An unchanging circle that only moves: built once here, and from then
+        // on only its position is touched.
         graphics = new PIXI.Graphics();
+        graphics.circle(0, 0, 5);
+        graphics.fill(0xff0000);
         this.container.addChild(graphics);
         this.projectileGraphicsMap.set(projId, graphics);
       }
 
-      graphics.clear();
-      graphics.circle(0, 0, 5);
-      graphics.fill(0xff0000);
       graphics.x = proj.x;
       graphics.y = proj.y;
     }
@@ -379,33 +385,31 @@ export class RendererAdapter {
    * Render explosion animation.
    */
   renderExplosion(collision: { type: string; x: number; y: number; time: number } | null): void {
-    if (collision) {
-      const now = Date.now();
-      const explosionElapsed = now - collision.time;
-      const explosionProgress = Math.min(1, explosionElapsed / this.explosionDuration);
+    if (!collision) return;
 
-      if (this.explosionGraphics) {
-        this.container.removeChild(this.explosionGraphics);
-      }
+    const progress = Math.min(1, (Date.now() - collision.time) / this.explosionDuration);
 
-      if (explosionProgress < 1) {
-        this.explosionGraphics = new PIXI.Graphics();
-        const maxRadius = 40;
-        const currentRadius = maxRadius * explosionProgress;
-        const alpha = 1 - explosionProgress;
-
-        this.explosionGraphics.circle(0, 0, currentRadius);
-        this.explosionGraphics.fill({ color: 0xff8800, alpha });
-        this.explosionGraphics.x = collision.x;
-        this.explosionGraphics.y = collision.y;
-        this.container.addChild(this.explosionGraphics);
-      } else {
-        if (this.explosionGraphics) {
-          this.container.removeChild(this.explosionGraphics);
-          this.explosionGraphics = null;
-        }
-      }
+    if (progress >= 1) {
+      if (this.explosionGraphics) this.explosionGraphics.visible = false;
+      return;
     }
+
+    // One persistent object, drawn at full size once and animated purely by
+    // transform. Previously a fresh Graphics was allocated every frame and the
+    // previous one merely detached — and detaching does not release GPU
+    // geometry, so a single charged shot orphaned around 150 of them.
+    if (!this.explosionGraphics) {
+      this.explosionGraphics = new PIXI.Graphics();
+      this.explosionGraphics.circle(0, 0, EXPLOSION_MAX_RADIUS);
+      this.explosionGraphics.fill(0xff8800);
+      this.container.addChild(this.explosionGraphics);
+    }
+
+    this.explosionGraphics.visible = true;
+    this.explosionGraphics.x = collision.x;
+    this.explosionGraphics.y = collision.y;
+    this.explosionGraphics.scale.set(progress);
+    this.explosionGraphics.alpha = 1 - progress;
   }
 
   /**
