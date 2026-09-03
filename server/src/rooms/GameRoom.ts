@@ -58,8 +58,13 @@ const WALK_PX_PER_MS = WALK_SPEED / 1000;
 /** Fixed simulation tick, matching setSimulationInterval below. */
 const SIMULATION_INTERVAL_MS = 16;
 
-export class GameRoom extends Room<RoomState> {
+export class GameRoom extends Room {
   maxClients = 2;
+  /**
+   * 0.17 dropped the state generic: the room declares its state as a field and
+   * the type is inferred from it, so `setState` in onCreate is redundant.
+   */
+  state = new RoomState();
   private terrainBitmap: Uint8Array = new Uint8Array(MAP_WIDTH * MAP_HEIGHT);
   private terrainOps: TerrainOp[] = [];
   private playerInputs: Map<string, { left: boolean; right: boolean; jump: boolean }> = new Map();
@@ -98,8 +103,8 @@ export class GameRoom extends Room<RoomState> {
   private airborneVxCarry: Map<string, number> = new Map();
   private map!: LoadedMap;
 
-  constructor(options: any) {
-    super(options);
+  constructor() {
+    super();
     this.initializeTerrainPlatform();
   }
 
@@ -119,8 +124,6 @@ export class GameRoom extends Room<RoomState> {
   }
 
   onCreate() {
-    this.setState(new RoomState());
-
     // Initialize adapters
     this.physics = new PhysicsAdapter({
       gravity: GRAVITY,
@@ -142,8 +145,9 @@ export class GameRoom extends Room<RoomState> {
     this.state.windSpeed = wind.magnitude * 100;
     this.state.windDirection = wind.angle;
 
-    // Physics loop - update every 16ms
-    this.setSimulationInterval(() => this.updatePhysics(), 16);
+    // Physics loop - update every 16ms. `setSimulationInterval` in 0.18 is a
+    // deprecated alias for this.
+    this.setTimestep(() => this.updatePhysics(), SIMULATION_INTERVAL_MS);
 
     this.onMessage('move', (client, data: { left: boolean; right: boolean; jump: boolean }) => {
       const validation = this.validator.validateMoveMessage(data, this.buildValidationGameState(), client.sessionId);
@@ -393,7 +397,7 @@ export class GameRoom extends Room<RoomState> {
     this.state.windDirection = wind.angle;
 
     // Update projectiles using PhysicsAdapter
-    const active = Array.from(this.state.projectiles.values());
+    const active: Projectile[] = Array.from(this.state.projectiles.values());
     this.physics.updateAllProjectiles(active, wind);
 
     // Check collisions
@@ -858,7 +862,10 @@ export class GameRoom extends Room<RoomState> {
     projectiles: Map<string, { x: number; y: number; firedBy: string }>;
   } {
     // Include both active and pending projectiles to prevent double-firing within single frame
-    const allProjectiles = [...this.state.projectiles.values(), ...this.pendingProjectiles];
+    const allProjectiles: Projectile[] = [
+      ...this.state.projectiles.values(),
+      ...this.pendingProjectiles,
+    ];
     const projectilesMap = new Map(
       allProjectiles.map((proj) => [proj.id, { x: proj.x, y: proj.y, firedBy: proj.firedBy }])
     );
@@ -895,69 +902,49 @@ export class GameRoom extends Room<RoomState> {
   }
 
   /**
-   * The only place that decides whether a departure is temporary.
+   * An abnormal disconnect. 0.17 split this out of onLeave, so the "might come
+   * back" case and the "definitely gone" case are now separate hooks rather
+   * than one method branching on a consent flag.
    *
-   * Deliberately kept whole rather than spread across the room: the
-   * reconnection hooks are restructured in Colyseus 0.18 (#24), and the
-   * migration should be a rewire of this method, not a hunt.
+   * Nothing is torn down here. That is the entire trick: the character keeps
+   * its health, position, turn and Movement Budget, so a reconnect restores
+   * everything by doing nothing at all.
    */
-  /**
-   * Release everything scoped to this room.
-   *
-   * Colyseus stops the simulation interval itself, but the room's own maps and
-   * buffers are ours. Without this they stayed reachable from the room object
-   * for as long as anything held a reference to it.
-   */
-  onDispose() {
-    this.playerInputs.clear();
-    this.walkCarry.clear();
-    this.blockedNotified.clear();
-    this.airborneVxCarry.clear();
-    this.rematchReady.clear();
-    this.pendingProjectiles = [];
-    this.terrainOps = [];
-    // The mask is MAP_WIDTH * MAP_HEIGHT bytes; drop it rather than leave the
-    // largest allocation in the room alive behind a stale reference.
-    this.terrainBitmap = new Uint8Array(0);
+  async onDrop(client: Client) {
+    const player = this.state.players.get(client.sessionId);
+    if (!player) return;
+
+    // They are not holding a key any more. Without this a player who
+    // disconnects mid-walk keeps walking.
+    this.playerInputs.delete(client.sessionId);
+    player.connected = false;
+
+    // Resolving means they came back and onReconnect has run; rejecting means
+    // the window closed, and then onLeave runs for the permanent departure.
+    await this.allowReconnection(client, RECONNECT_WINDOW_SECONDS);
   }
 
-  async onLeave(client: Client, consented?: boolean) {
+  /** They made it back inside the window. */
+  async onReconnect(client: Client) {
+    const player = this.state.players.get(client.sessionId);
+    if (player) player.connected = true;
+  }
+
+  /**
+   * Permanent departure only.
+   *
+   * In 0.17+ this no longer runs for a recoverable drop — onDrop owns that
+   * window — so everything here is unconditional teardown. It still fires for
+   * a deliberate leave and for a drop whose window expired.
+   */
+  async onLeave(client: Client) {
     // A player whose character was destroyed is still a client — they are
     // watching the result and may want a rematch — so this bookkeeping runs
     // whether or not they still have a character on the field.
     this.rematchReady.delete(client.sessionId);
-
-    const player = this.state.players.get(client.sessionId);
-    if (!player) {
-      this.considerRematch();
-      return;
-    }
-
-    // Whether or not they come back, they are not holding a key right now.
-    // Without this a player who disconnects mid-walk keeps walking.
     this.playerInputs.delete(client.sessionId);
 
-    if (consented) {
-      // A deliberate leave is a decision, not an accident. Do not make the
-      // opponent wait out a window for someone who has already gone.
-      this.removePlayer(client.sessionId);
-      this.considerRematch();
-      return;
-    }
-
-    player.connected = false;
-
-    try {
-      await this.allowReconnection(client, RECONNECT_WINDOW_SECONDS);
-      // Still in the match, still holding whatever turn and Movement Budget
-      // they had: nothing was torn down, so nothing needs restoring.
-      const rejoined = this.state.players.get(client.sessionId);
-      if (rejoined) rejoined.connected = true;
-    } catch {
-      // Window expired, or the room was disposed underneath us. removePlayer
-      // is idempotent, so a disposal race cannot pass the turn twice.
-      this.removePlayer(client.sessionId);
-      this.considerRematch();
-    }
+    this.removePlayer(client.sessionId);
+    this.considerRematch();
   }
 }

@@ -13,8 +13,10 @@
   },
   "dependencies": {
     "@browserbond/shared": "workspace:*",
-    "@colyseus/schema": "^2.0.0",
-    "colyseus": "^0.15.0",
+    "@colyseus/schema": "^5.0.27",
+    "@colyseus/ws-transport": "^0.18.2",
+    "colyseus": "^0.18.5",
+    "express": "^5.2.1",
     "pngjs": "^7.0.0"
   },
   "devDependencies": {

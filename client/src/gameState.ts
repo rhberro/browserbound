@@ -1,4 +1,4 @@
-import { Client, Room } from 'colyseus.js';
+import { Client, Room, getStateCallbacks } from '@colyseus/sdk';
 import {
   PlayerView,
   TurnView,
@@ -7,7 +7,6 @@ import {
   Projectile,
   ProjectileView,
   TerrainOp,
-  RECONNECT_WINDOW_SECONDS,
 } from '@browserbond/shared';
 
 /**
@@ -71,15 +70,16 @@ export class GameState {
   /**
    * Reconnection is driven entirely from here.
    *
-   * The server holds a character, its turn and its Movement Budget for
-   * RECONNECT_WINDOW_SECONDS after a drop; none of that is any use unless the
+   * The server holds a character, its turn and its Movement Budget for the
+   * length of the reconnection window; none of that is any use unless the
    * client actually comes back for it. The token is kept in sessionStorage so a
    * reload inside the window rejoins the same match rather than starting a new
    * one — it is scoped to the tab and cleared on a deliberate leave, so it can
    * never resurrect a match the player has finished with.
    */
   private static readonly TOKEN_KEY = 'browserbound:reconnectionToken';
-  private leaving = false;
+  /** Unsubscribe functions for state callbacks bound to the current room. */
+  private stateUnsubscribers: Array<() => void> = [];
 
   /** Notified when the connection drops and again when it is restored. */
   public onConnectionChange: ((connected: boolean) => void) | null = null;
@@ -131,117 +131,112 @@ export class GameState {
     this.registerMessageHandlers();
   }
 
-  /** Subscribe to the room's synchronized state. Re-run after a reconnect. */
+  /**
+   * Subscribe to the room's synchronized state. Re-run after a reconnect.
+   *
+   * 0.16 moved callbacks OFF the schema instances: `state.players.onAdd(...)`
+   * is gone, and registration goes through a proxy from `getStateCallbacks`.
+   * The instances themselves stay plain data, which is why every read below
+   * still touches `player.x` directly — only the *subscription* changed.
+   *
+   * Every registration returns an unsubscribe function, and they are collected
+   * so a reconnect can drop the old room's listeners. `reconnect` hands back a
+   * NEW Room, and listeners left on the previous one would keep firing against
+   * state nothing updates any more.
+   */
   private bindStateListeners(): void {
-    if (this.room?.state) {
-      // Initialize turnState immediately from current state (don't wait for onChange)
-      this.updateTurnState();
-    }
+    if (!this.room?.state) return;
+    this.unbindStateListeners();
 
-    if (this.room?.state && this.room.state.players) {
-      this.room.state.players.onAdd((player: Player, key: string) => {
+    const $ = getStateCallbacks(this.room);
+    const track = (off: () => void) => this.stateUnsubscribers.push(off);
+
+    // Initialize turnState immediately from current state (don't wait for onChange)
+    this.updateTurnState();
+
+    track(
+      $(this.room.state).players.onAdd((player: Player, key: string) => {
         this.players.set(key, snapshot(player));
-        player.onChange(() => {
-          this.players.set(key, snapshot(player));
-        });
-      });
+        track(
+          $(player).onChange(() => {
+            this.players.set(key, snapshot(player));
+          })
+        );
+      })
+    );
 
-      this.room.state.players.onRemove((_player: Player, key: string) => {
+    track(
+      $(this.room.state).players.onRemove((_player: Player, key: string) => {
         this.players.delete(key);
-      });
-    }
+      })
+    );
 
-    if (this.room?.state && this.room.state.projectiles) {
-      // Projectiles arrive as state like everything else that moves. There is
-      // no announcement message and no per-frame position message: appearing
-      // in this map IS the shot being fired, and leaving it is the shot being
-      // over, however it ended.
-      this.room.state.projectiles.onAdd((proj: Projectile, key: string) => {
+    // Projectiles arrive as state like everything else that moves. There is no
+    // announcement message and no per-frame position message: appearing in
+    // this map IS the shot being fired, and leaving it is the shot being over,
+    // however it ended.
+    track(
+      $(this.room.state).projectiles.onAdd((proj: Projectile, key: string) => {
         this.projectiles.set(key, { x: proj.x, y: proj.y });
-        proj.onChange(() => {
-          this.projectiles.set(key, { x: proj.x, y: proj.y });
-        });
-      });
+        track(
+          $(proj).onChange(() => {
+            this.projectiles.set(key, { x: proj.x, y: proj.y });
+          })
+        );
+      })
+    );
 
-      this.room.state.projectiles.onRemove((_proj: Projectile, key: string) => {
+    track(
+      $(this.room.state).projectiles.onRemove((_proj: Projectile, key: string) => {
         this.projectiles.delete(key);
-      });
-    }
+      })
+    );
 
-    if (this.room?.state) {
-      // Listen for state changes
-      this.room.state.onChange(() => {
+    track(
+      $(this.room.state).onChange(() => {
         this.updateTurnState();
-      });
-    }
+      })
+    );
+  }
+
+  /** Drop every state callback registered against the current room. */
+  private unbindStateListeners(): void {
+    for (const off of this.stateUnsubscribers) off();
+    this.stateUnsubscribers = [];
   }
 
   /**
-   * Rejoin after an unexpected drop, for as long as the server's window lasts.
+   * Track connection state through the SDK's own reconnection.
    *
-   * Code 1000 is a clean close — the player left on purpose, or the match
-   * ended — and must not be retried, or leaving the game would immediately
-   * rejoin it. Anything else is the case this exists for.
+   * 0.18 reconnects automatically and preserves this Room instance along with
+   * every state callback and message handler on it, so the hand-rolled retry
+   * loop and listener-rebinding this replaced are not merely redundant — two
+   * mechanisms racing to reconnect the same session would fight. What is left
+   * is reporting which state we are in.
    */
   private watchForDisconnect(): void {
     if (!this.room) return;
-    this.room.onLeave((code: number) => {
-      if (this.leaving || code === 1000) {
-        this.rememberToken(null);
-        return;
-      }
+
+    this.room.onDrop(() => {
       this.onConnectionChange?.(false);
-      void this.reconnectLoop();
     });
-  }
 
-  private async reconnectLoop(): Promise<void> {
-    const token = this.storedToken();
-    if (!token) return;
-
-    const deadline = Date.now() + RECONNECT_WINDOW_SECONDS * 1000;
-    let delayMs = 500;
-
-    while (Date.now() < deadline && !this.leaving) {
-      await new Promise((resolve) => setTimeout(resolve, delayMs));
-      // Back off, but keep retrying often enough to use most of the window.
-      delayMs = Math.min(delayMs * 2, 4000);
-      try {
-        this.room = await this.client.reconnect(token);
-      } catch {
-        continue;
-      }
-      this.rememberToken(this.room.reconnectionToken);
-      this.rebindRoom();
+    this.room.onReconnect(() => {
+      this.rememberToken(this.room?.reconnectionToken ?? null);
       this.onConnectionChange?.(true);
-      return;
-    }
+    });
 
-    // The window has closed; the server has already removed the character.
-    this.rememberToken(null);
-  }
-
-  /**
-   * Re-attach every listener to the room object returned by a reconnect.
-   *
-   * `reconnect` hands back a NEW Room instance, so callbacks registered on the
-   * old one are attached to an object nothing will ever update again — the
-   * game would appear frozen while the connection was in fact healthy.
-   */
-  private rebindRoom(): void {
-    if (!this.room) return;
-    this.players.clear();
-    this.projectiles.clear();
-    this.bindStateListeners();
-    this.registerMessageHandlers();
-    this.watchForDisconnect();
-    this.updateTurnState();
+    // Reached only once the SDK has given up, or on a clean close. Either way
+    // the session is over and the token is worthless.
+    this.room.onLeave(() => {
+      this.rememberToken(null);
+    });
   }
 
   /** Leave on purpose: no reconnection window, no stored token. */
   async leave(): Promise<void> {
-    this.leaving = true;
     this.rememberToken(null);
+    this.unbindStateListeners();
     await this.room?.leave(true);
     this.room = null;
   }

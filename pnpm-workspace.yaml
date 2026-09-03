@@ -5,3 +5,9 @@ packages:
 allowBuilds:
   esbuild: false
   msgpackr-extract: false
+
+# Colyseus lists BOTH its transports as optional peer dependencies and we use
+# the ws one. uWebSockets.js resolves from a git repository, which pnpm blocks
+# in subdependencies; auto-installing a peer we never load is what dragged it
+# in. Narrower than turning the exotic-subdep guard off for the whole repo.
+autoInstallPeers: false
