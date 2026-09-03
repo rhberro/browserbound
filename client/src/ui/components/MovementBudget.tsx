@@ -1,8 +1,4 @@
-import {
-  isOutOfMovement,
-  movementFillStyle,
-  movementText,
-} from '../signals';
+import { isOutOfMovement, movementBlockText, movementFillStyle, movementText } from '../signals';
 
 /**
  * How far this character may still walk this turn.
@@ -32,14 +28,14 @@ export function MovementBudget() {
         <span class="min-w-8 text-right text-xs font-semibold tabular-nums">{movementText}</span>
       </div>
 
-      {/* Reserved whether or not it is showing, so the deck does not jump
-          height at the moment the budget runs out. */}
+      {/* Space reserved whether or not there is a message, so the deck does
+          not jump height the moment movement stops. */}
       <span
         class={`text-[10px] font-semibold ${
-          spent ? 'text-amber-400' : 'invisible text-transparent'
+          movementBlockText.value ? 'text-amber-400' : 'invisible text-transparent'
         }`}
       >
-        Out of movement — fire or wait
+        {movementBlockText.value || '\u00a0'}
       </span>
     </div>
   );

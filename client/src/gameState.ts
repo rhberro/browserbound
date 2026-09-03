@@ -50,7 +50,6 @@ export class GameState {
    */
   public onMapLoad: ((mapId: string) => void) | null = null;
   private pendingMapId: string | null = null;
-  public onPlayerHit: ((targetId: string, health: number) => void) | null = null;
   public onPlayerDied: ((playerId: string, x: number, y: number) => void) | null = null;
   private pendingTerrainOps: TerrainOp[] = [];
 
@@ -87,6 +86,9 @@ export class GameState {
 
   /** Notified as players vote for a rematch: how many are ready, out of how many. */
   public onRematchReady: ((ready: number, of: number) => void) | null = null;
+
+  /** Notified when this character walks into terrain it cannot climb. */
+  public onBlocked: (() => void) | null = null;
 
   private storedToken(): string | null {
     try {
@@ -255,12 +257,11 @@ export class GameState {
         time: Date.now(),
       };
 
-      if (data.type === 'player') {
-        if (this.onPlayerHit) {
-          this.onPlayerHit(data.targetId, data.health);
-        }
-      }
-
+      // No hit callback. It had no subscriber, and it read `data.health` —
+      // a field this broadcast has never carried, so it always passed
+      // undefined. Health is synchronized state and reaches the health bar
+      // that way.
+      //
       // Removal is state's job, not this message's. The impact stays a
       // message because it is an EVENT — it happens once, at a moment — while
       // the projectile's existence is continuous state.
@@ -302,6 +303,14 @@ export class GameState {
       } else {
         this.pendingTerrainOps.push(op);
       }
+    });
+
+    // A Blocked Move: the character is against terrain it cannot climb, which
+    // costs no Movement Budget and so leaves the budget bar unmoving. The
+    // server already debounces this; without a listener it was a cue computed
+    // and thrown away.
+    this.room.onMessage('unableToMove', (data: { playerId: string }) => {
+      if (data.playerId === this.room?.sessionId) this.onBlocked?.();
     });
 
     this.room.onMessage('rematchReady', (data: { ready: number; of: number }) => {

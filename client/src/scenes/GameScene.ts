@@ -4,7 +4,13 @@ import { InputAdapter } from '../adapters/InputAdapter';
 import { CameraAdapter } from '../adapters/CameraAdapter';
 import { RendererAdapter } from '../adapters/RendererAdapter';
 import { mountHud } from '../ui/mountHud';
-import { syncHudSignals, isConnected, rematchReady, rematchOf } from '../ui/signals';
+import {
+  syncHudSignals,
+  isConnected,
+  rematchReady,
+  rematchOf,
+  blockedAt,
+} from '../ui/signals';
 
 export class GameScene {
   private app: PIXI.Application;
@@ -43,6 +49,10 @@ export class GameScene {
     // in progress from a hang.
     this.gameState.onConnectionChange = (connected) => {
       isConnected.value = connected;
+    };
+
+    this.gameState.onBlocked = () => {
+      blockedAt.value = Date.now();
     };
 
     this.gameState.onRematchReady = (ready, of) => {

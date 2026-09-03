@@ -1,7 +1,7 @@
 import { Room, Client } from 'colyseus';
 import {
   GRAVITY, WIND_INTEGRATION, TerrainOp, MAP_WIDTH, MAP_HEIGHT,
-  DEFAULT_CRATER_RADIUS, applyOpToBitmap, collapseLips, PLAYER_HEIGHT,
+  DEFAULT_CRATER_RADIUS, applyOpToBitmap, collapseLips, appendOp, PLAYER_HEIGHT,
   MOVE_BUDGET, WALK_SPEED, TURN_TIME_MS, TERMINAL_VELOCITY,
   PROJECTILE_MAX_LIFETIME_FRAMES, RECONNECT_WINDOW_SECONDS,
   walkStep, settle, testCollisionY, pushOutOfWall, airborneHorizontal, computeTilt, Body,
@@ -278,10 +278,9 @@ export class GameRoom extends Room<RoomState> {
     this.endTurnClock();
     this.rematchReady.clear();
 
-    this.broadcast('matchEnded', {
-      winnerId: this.state.winnerId,
-      draw: this.state.winnerId === '',
-    });
+    // No matchEnded broadcast: matchPhase and winnerId are synchronized state,
+    // and the client renders the result from them. A message saying the same
+    // thing again is a second source of truth for one fact.
   }
 
   private endTurnClock(): void {
@@ -465,7 +464,6 @@ export class GameRoom extends Room<RoomState> {
       if (collision) {
         const weapon = getWeapon(proj.weaponType);
         const range = splashRange(weapon.splashRadius);
-        const affectedPlayers: string[] = [];
         // killPlayer deletes from this.state.players, which is the collection
         // this loop is walking. Collect the casualties and resolve them after
         // the walk, so a blast that kills two characters cannot skip the
@@ -490,7 +488,6 @@ export class GameRoom extends Room<RoomState> {
           // Clamped: this value is broadcast, and a character killed by a
           // large blast would otherwise be reported at negative health.
           player.health = Math.max(0, player.health - dmg);
-          affectedPlayers.push(playerId);
 
           // Apply knockback
           const kb = knockbackImpulse(dx, dy, dmg, weapon.knockbackScale);
@@ -509,19 +506,15 @@ export class GameRoom extends Room<RoomState> {
         // Always destroy terrain at impact point, regardless of collision type
         this.destroyTerrain(collision.x, collision.y, weapon.craterRadius);
 
-        // Health is read BEFORE the casualties are resolved below, so a killed
-        // character is reported at the health that killed it rather than
-        // vanishing from the payload.
+        // Where and what, nothing more. The damage this blast did travels as
+        // synchronized health; repeating it here made the payload a second
+        // source of truth that no client ever read.
         this.broadcast('collision', {
           type: collision.type,
           projectileId: proj.id,
           ...(collision.type === 'player' ? { targetId: collision.playerId } : {}),
           x: collision.x,
           y: collision.y,
-          affectedPlayers: affectedPlayers.map((id) => {
-            const p = this.state.players.get(id);
-            return { playerId: id, health: p?.health ?? 0 };
-          }),
         });
 
         // Safe now that the walk is finished.
@@ -565,7 +558,8 @@ export class GameRoom extends Room<RoomState> {
       this.turnEndsAtMs > 0 &&
       Date.now() > this.turnEndsAtMs
     ) {
-      this.broadcast('turnTimeout', { playerId: this.state.currentPlayerId });
+      // No turnTimeout broadcast: nothing listened for it, and since #19 the
+      // countdown reaching zero IS the notification.
       this.advanceTurn();
     }
 
@@ -833,7 +827,9 @@ export class GameRoom extends Room<RoomState> {
 
   private destroyTerrain(x: number, y: number, radius: number = DEFAULT_CRATER_RADIUS) {
     const op: TerrainOp = { type: 'explosion', x: Math.floor(x), y: Math.floor(y), radius };
-    this.terrainOps.push(op);
+    // Compacted rather than appended blindly: the log is replayed in full to
+    // every joining client, and lip collapse below emits one op per column.
+    this.terrainOps = appendOp(this.terrainOps, op);
     applyOpToBitmap(this.terrainBitmap, op, MAP_WIDTH, MAP_HEIGHT);
     this.broadcast('terrainOp', op);
 
@@ -850,7 +846,7 @@ export class GameRoom extends Room<RoomState> {
       PLAYER_HEIGHT
     );
     for (const lip of lipOps) {
-      this.terrainOps.push(lip);
+      this.terrainOps = appendOp(this.terrainOps, lip);
       applyOpToBitmap(this.terrainBitmap, lip, MAP_WIDTH, MAP_HEIGHT);
       this.broadcast('terrainOp', lip);
     }
@@ -905,6 +901,26 @@ export class GameRoom extends Room<RoomState> {
    * reconnection hooks are restructured in Colyseus 0.18 (#24), and the
    * migration should be a rewire of this method, not a hunt.
    */
+  /**
+   * Release everything scoped to this room.
+   *
+   * Colyseus stops the simulation interval itself, but the room's own maps and
+   * buffers are ours. Without this they stayed reachable from the room object
+   * for as long as anything held a reference to it.
+   */
+  onDispose() {
+    this.playerInputs.clear();
+    this.walkCarry.clear();
+    this.blockedNotified.clear();
+    this.airborneVxCarry.clear();
+    this.rematchReady.clear();
+    this.pendingProjectiles = [];
+    this.terrainOps = [];
+    // The mask is MAP_WIDTH * MAP_HEIGHT bytes; drop it rather than leave the
+    // largest allocation in the room alive behind a stale reference.
+    this.terrainBitmap = new Uint8Array(0);
+  }
+
   async onLeave(client: Client, consented?: boolean) {
     // A player whose character was destroyed is still a client — they are
     // watching the result and may want a rematch — so this bookkeeping runs

@@ -18,8 +18,12 @@ export class Player extends Schema {
   @type('string') id = '';
   @type('number') x = 0;
   @type('number') y = 0;
-  @type('number') vx = 0;
-  @type('number') vy = 0;
+  /**
+   * Velocity. Server-only: the client never predicts motion, it interpolates
+   * positions, so these were on the wire every patch for nobody.
+   */
+  vx = 0;
+  vy = 0;
   @type('number') health = 100;
   @type('number') facing = 1; // 1 = direita, -1 = esquerda
   /** Pixels of walking left this turn. Spent per pixel actually advanced. */
@@ -32,7 +36,21 @@ export class Player extends Schema {
    * with an aim angle by hand — see `worldFiringAngle`.
    */
   @type('number') tilt = 0;
-  /** Aim angle in radians, measured RELATIVE TO THE CHASSIS, clamped to [AIM_MIN_DEG, AIM_MAX_DEG]. */
+  /**
+   * Aim angle in radians, measured RELATIVE TO THE CHASSIS, clamped to
+   * [AIM_MIN_DEG, AIM_MAX_DEG].
+   *
+   * SYNCHRONIZED AND CONSUMED, deliberately. A comment beside the server's aim
+   * handler used to claim aim was "exclusive to each player's UI" while this
+   * declaration broadcast it to the whole room — the worst of both, sent to
+   * opponents who could read it and ignored by the client that needed it.
+   *
+   * Settled in favour of broadcasting: the renderer draws the on-character aim
+   * arrow for whoever holds the turn, and from the opponent's screen that IS
+   * this field. A barrel you can watch swing is information the game should
+   * give you; a barrel that moves only on your own screen would make the
+   * opponent's character read as inert while they aim.
+   */
   @type('number') aimAngle = 0;
   /**
    * False while this player's connection is dropped and their reconnection

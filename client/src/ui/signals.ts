@@ -36,6 +36,9 @@ export const mySessionId = signal('');
 export const rematchReady = signal(0);
 export const rematchOf = signal(0);
 
+/** Epoch ms of the last Blocked Move, so the cue can fade on its own. */
+export const blockedAt = signal(0);
+
 /**
  * False while our OWN connection is dropped and being retried.
  *
@@ -76,6 +79,34 @@ export const movementText = computed(() => `${Math.max(0, Math.round(movementBud
 export const isOutOfMovement = computed(
   () => isMyTurn.value && movementBudget.value <= 0
 );
+
+/** How long the Blocked Move cue stays up. */
+const BLOCKED_CUE_MS = 1200;
+
+/**
+ * Ticked once a frame so time-based cues expire without their own timers.
+ *
+ * This invalidates the computed below every frame, which is cheap — it returns
+ * the same string almost always, and signals compare with === before notifying,
+ * so the DOM text node is only touched when the message actually changes.
+ */
+export const nowMs = signal(Date.now());
+
+/**
+ * Why movement is not happening, or empty when it is.
+ *
+ * The two reasons look identical on screen — the character stops — and mean
+ * opposite things: a spent budget is over for the turn, while a wall is free
+ * to walk away from. Blocked wins when both apply, because it is the
+ * transient one and the one the player can act on.
+ */
+export const movementBlockText = computed(() => {
+  if (blockedAt.value > 0 && nowMs.value - blockedAt.value < BLOCKED_CUE_MS) {
+    return 'Blocked — that slope is too steep';
+  }
+  return isOutOfMovement.value ? 'Out of movement — fire or wait' : '';
+});
+
 
 export const turnSecondsText = computed(() => `${turnSeconds.value}s`);
 
@@ -148,6 +179,8 @@ export function syncHudSignals(gameState: GameState, inputAdapter: InputAdapter)
     // arithmetic happens here and client clock skew cannot affect it.
     turnSeconds.value = turnState.turnSecondsRemaining;
   }
+
+  nowMs.value = Date.now();
 
   const me = gameState.getMyPlayer();
   movementBudget.value = me ? me.movementBudget : 0;
