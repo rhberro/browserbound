@@ -55,6 +55,12 @@ export class TerrainSurface {
   private scorchTexture: PIXI.RenderTexture;
   private sprite: PIXI.Sprite;
   private scorchSprite: PIXI.Sprite;
+  /**
+   * The mask clipping the scorch layer to the terrain's alpha. A sprite of the
+   * terrain texture. Kept OUT of the display tree and used only as a mask,
+   * because a mask object is excluded from its parent's render in Pixi 8.
+   */
+  private maskSprite: PIXI.Sprite;
   /** The display root: terrain sprite, then the scorch layer over it. */
   private root: PIXI.Container;
 
@@ -125,15 +131,22 @@ export class TerrainSurface {
     this.sprite.y = 0;
 
     // The scorch layer sits over the terrain, multiplied in and clipped by the
-    // terrain sprite's alpha — the whole trick: it can only darken where there
-    // is terrain. Both are display sprites, so there is no render-to-texture
-    // feedback (the mask reads the terrain's current alpha, and the composite
-    // is a normal display pass, not a write into the masked texture).
+    // terrain's alpha — the whole trick: it can only darken where there is
+    // terrain.
     this.scorchSprite = new PIXI.Sprite(this.scorchTexture);
     this.scorchSprite.x = 0;
     this.scorchSprite.y = 0;
     this.scorchSprite.blendMode = 'multiply';
-    this.scorchSprite.mask = this.sprite;
+
+    // A mask object is EXCLUDED from its parent's normal render in Pixi 8, so
+    // the terrain sprite itself can never be the mask — it would stop being
+    // drawn. The mask is a separate sprite of the SAME terrain texture, kept
+    // out of the display tree, so the terrain sprite renders and the scorch is
+    // still clipped to terrain.
+    this.maskSprite = new PIXI.Sprite(this.texture);
+    this.maskSprite.x = 0;
+    this.maskSprite.y = 0;
+    this.scorchSprite.mask = this.maskSprite;
 
     this.root = new PIXI.Container();
     this.root.addChild(this.sprite, this.scorchSprite);
@@ -284,6 +297,7 @@ export class TerrainSurface {
   destroy(): void {
     this.sprite.destroy();
     this.scorchSprite.destroy();
+    this.maskSprite.destroy();
     this.paintRoot.destroy({ children: true });
     this.texture.destroy(true);
     this.scorchTexture.destroy(true);
