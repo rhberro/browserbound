@@ -432,11 +432,15 @@ export class GameState {
     const state = this.room.state;
     this.turnState = {
       currentPlayerId: state.currentPlayerId,
+      roomName: state.roomName,
+      hostSessionId: state.hostSessionId,
+      teamCount: state.teamCount,
+      teamSize: state.teamSize,
       windSpeed: state.windSpeed,
       windDirection: state.windDirection,
       turnSecondsRemaining: state.turnSecondsRemaining,
       matchPhase: state.matchPhase,
-      winnerId: state.winnerId,
+      winningTeamId: state.winningTeamId,
     };
   }
 

@@ -31,7 +31,7 @@ export const turnSeconds = signal(0);
 
 /** Match outcome. `matchEnded` gates the whole result overlay. */
 export const matchEnded = signal(false);
-export const winnerId = signal('');
+export const winningTeamId = signal(-1);
 export const mySessionId = signal('');
 
 /** One player in acting order, for the Delay readout. */
@@ -138,8 +138,8 @@ export const turnSecondsText = computed(() => `${turnSeconds.value}s`);
  */
 export const matchResultText = computed(() => {
   if (!matchEnded.value) return '';
-  if (winnerId.value === '') return 'Draw';
-  return winnerId.value === mySessionId.value ? 'You win' : 'You lose';
+  if (winningTeamId.value === -1) return 'Draw';
+  return 'Match ended'; // Team-based result text will be implemented in issue #49
 });
 
 export const rematchText = computed(() =>
@@ -219,7 +219,7 @@ export function syncHudSignals(gameState: GameState, inputAdapter: InputAdapter)
 
   if (turnState) {
     matchEnded.value = turnState.matchPhase === 'ended';
-    winnerId.value = turnState.winnerId;
+    winningTeamId.value = turnState.winningTeamId;
   }
   mySessionId.value = gameState.getRoomSessionId() ?? '';
 
