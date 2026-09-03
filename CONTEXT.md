@@ -278,6 +278,9 @@ and the real-world direction moves with the chassis.
 Aim is confined to a fixed range relative to the chassis. Terrain that tilts a character far enough
 can press its aim against that limit, denying shots that would be available on level ground.
 
+The **HUD displays the world angle** — the chassis-relative dial offset by the tilt — so the number
+a player reads is measured from the horizontal even though the value behind it is not.
+
 ### Reconnection Window
 
 A dropped connection is not a departure. A character whose player has disconnected stays on the

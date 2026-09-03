@@ -1,7 +1,7 @@
 import { computed, signal } from '@preact/signals';
 import type { GameState } from '../gameState';
 import type { AimState, InputAdapter } from '../adapters/InputAdapter';
-import { MOVE_STEPS } from '@browserbond/shared';
+import { MOVE_STEPS, worldAimDeg } from '@browserbond/shared';
 import { readLastShotValue, writeLastShotValue } from './lastShotStore';
 import { windRotationDeg } from './windDialGeometry';
 
@@ -175,9 +175,9 @@ let wasCharging = false;
 let chargingAngle = 0;
 let chargingPower = 0;
 
-function commitLastShot(aim: AimState): void {
+function commitLastShot(aim: AimState, displayAngleDeg: number): void {
   if (aim.isCharging) {
-    chargingAngle = aim.angleDeg;
+    chargingAngle = displayAngleDeg;
     chargingPower = aim.power;
   } else if (wasCharging) {
     lastAngle.value = chargingAngle;
@@ -195,8 +195,10 @@ function commitLastShot(aim: AimState): void {
 /** Push the current frame's game and input state into the HUD. */
 export function syncHudSignals(gameState: GameState, inputAdapter: InputAdapter): void {
   const aim = inputAdapter.getAimState();
+  const me = gameState.getMyPlayer();
+  const displayAngleDeg = me ? worldAimDeg(aim.angleDeg, me.tilt, me.facing || 1) : aim.angleDeg;
 
-  angle.value = aim.angleDeg;
+  angle.value = displayAngleDeg;
   power.value = aim.power;
   isCharging.value = aim.isCharging;
   selectedWeapon.value = inputAdapter.getSelectedWeapon();
@@ -213,7 +215,6 @@ export function syncHudSignals(gameState: GameState, inputAdapter: InputAdapter)
 
   nowMs.value = Date.now();
 
-  const me = gameState.getMyPlayer();
   movementBudget.value = me ? me.movementBudget : 0;
 
   if (turnState) {
@@ -240,7 +241,7 @@ export function syncHudSignals(gameState: GameState, inputAdapter: InputAdapter)
     })
     .sort((a, b) => a.delay - b.delay || a.label.localeCompare(b.label));
 
-  commitLastShot(aim);
+  commitLastShot(aim, displayAngleDeg);
 }
 
 /** The deck dims while the opponent plays. Inertness itself comes from the

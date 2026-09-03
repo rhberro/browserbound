@@ -68,3 +68,19 @@ export function worldFiringAngle(frame: AimFrame): number {
   // ...then rotate the whole chassis into the world.
   return barrel - tilt;
 }
+
+/**
+ * The aim angle the HUD shows, in degrees: the barrel's elevation above the
+ * horizontal, in the direction the character faces.
+ *
+ * Aim is stored chassis-relative (ADR 0003), so a tilted chassis shifts the
+ * world elevation by its tilt — `aim - tilt` facing right, `aim + tilt` facing
+ * left — because tilt is measured in screen space (y down) while elevation is
+ * measured in the world. On a steep enough slope the result can leave
+ * [AIM_MIN_DEG, AIM_MAX_DEG]; that is correct: the number reports where the
+ * barrel actually points, not the dial position.
+ */
+export function worldAimDeg(aimDeg: number, tiltRad: number, facing: number): number {
+  const tiltDeg = (Number.isFinite(tiltRad) ? tiltRad : 0) * (180 / Math.PI);
+  return (Number.isFinite(aimDeg) ? aimDeg : 0) - facing * tiltDeg;
+}

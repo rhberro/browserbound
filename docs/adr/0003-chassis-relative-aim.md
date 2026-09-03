@@ -70,3 +70,17 @@ failure mode. Clamping explains itself: the barrel stops moving.
 **Preserving the world angle across tilt changes** (barrel counter-rotates as you walk, shot stays
 on target). Rejected because it is cosmetic tilt wearing a costume — if the world angle survives
 every tilt change, the ground never affects the shot.
+
+## Amendment — the HUD reports the world angle
+
+Accepted — 2026-09-03, superseding this ADR's "the HUD displays the chassis-relative angle".
+
+Aim remains measured relative to the chassis: the ground under a character still changes where its
+shot goes, the dialled angle is still clamped to the chassis-relative range, and firing still
+derives its direction from the chassis. What changes is what the HUD reports.
+
+The HUD now shows the barrel's **world angle** — the chassis-relative dial offset by the tilt — not
+the raw dial position. A player therefore reads a number measured from the horizontal: 45° means
+45° above the horizontal, even though the value behind it is chassis-relative. This restores the
+world-frame number this ADR originally gave up, so the aim line is no longer the sole world-frame
+feedback in the game.
