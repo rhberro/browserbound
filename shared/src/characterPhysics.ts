@@ -287,25 +287,57 @@ export function computeTilt(
 }
 
 /**
+ * A drawn body: a contact point plus the lean of the chassis standing on it.
+ * `tilt` is optional and defaults to 0, which is also what an airborne
+ * character has.
+ */
+export interface TiltedBody extends Body {
+  tilt?: number;
+}
+
+/**
  * Is a point inside a character's DRAWN body?
  *
- * The box is `PLAYER_WIDTH` wide, centred horizontally on `body.x`, and
- * `PLAYER_HEIGHT` tall standing ON `body.y` — so it spans
- * `[y - PLAYER_HEIGHT, y]`. `body.y` is the contact point, and therefore the
- * bottom edge.
+ * An ORIENTED box: `PLAYER_WIDTH` by `PLAYER_HEIGHT`, standing on `body.y`, and
+ * rotated with the chassis about that contact point — the same point PixiJS
+ * rotates the sprite about, so the test and the drawing are the same rectangle.
  *
- * This is the ONE place the box survives, and it is GunBound's `CollisionOffset`
- * — a per-mobile hit radius that likewise never touches terrain. Projectiles
- * used to be tested against a circle of radius 20 centred on the feet, which is
- * wrong at both ends: a shot at head height falls outside it and misses a
- * character it visually struck, while a shot passing below the feet — inside
- * the ground — falls within it and hits.
+ * This is the ONE place the box survives, and it is GunBound's `CollisionBox`
+ * — a per-mobile hit shape that likewise rotates with the mobile and likewise
+ * never touches terrain.
+ *
+ * It is oriented rather than axis-aligned because ADR 0004 left it exactly one
+ * job: being the thing players aim at. While the box was also the physics body
+ * there was a real argument for axis-alignment, since an oriented box has to be
+ * swept against the terrain mask; once terrain contact became a point, the only
+ * question left was whether the hit target agrees with the picture. A static
+ * box does not: at 10 degrees of tilt the drawn head is already 6px outside it,
+ * and at 20 degrees 11.6px — most of a half-width — so characters were shot in
+ * a box their sprite had visibly left, and shots that struck the head passed
+ * through it.
+ *
+ * The transform is the standard one: rotate the query point by MINUS the tilt
+ * about the contact point, which puts it in the body's own frame, then run the
+ * axis-aligned test there. At tilt 0 it is exactly the old test.
+ *
+ * Projectiles were once tested against a circle of radius 20 centred on the
+ * feet, which is wrong at both ends: a shot at head height falls outside it and
+ * misses a character it visually struck, while a shot passing below the feet —
+ * inside the ground — falls within it and hits.
  */
-export function pointInBody(px: number, py: number, body: Body): boolean {
+export function pointInBody(px: number, py: number, body: TiltedBody): boolean {
+  const tilt = body.tilt ?? 0;
+  const dx = px - body.x;
+  const dy = py - body.y;
+
+  // Rotate by -tilt into body space. Sin is negated rather than the angle,
+  // which is the same rotation with one fewer trig call.
+  const c = Math.cos(tilt);
+  const s = Math.sin(tilt);
+  const lx = dx * c + dy * s;
+  const ly = -dx * s + dy * c;
+
   return (
-    px >= body.x - HALF_WIDTH &&
-    px <= body.x + HALF_WIDTH &&
-    py >= body.y - PLAYER_HEIGHT &&
-    py <= body.y
+    lx >= -HALF_WIDTH && lx <= HALF_WIDTH && ly >= -PLAYER_HEIGHT && ly <= 0
   );
 }

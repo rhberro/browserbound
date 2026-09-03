@@ -3,6 +3,7 @@ import {
   GRAVITY, WIND_INTEGRATION, TerrainOp, MAP_WIDTH, MAP_HEIGHT,
   DEFAULT_CRATER_RADIUS, applyOpToBitmap, collapseLips, appendOp, PLAYER_HEIGHT,
   MOVE_STEPS, TURN_TIME_MS, TERMINAL_VELOCITY, WIND_DRIFT_SCALE, KNOCKBACK_SHOVE_SCALE,
+  PROJECTILE_CEILING, PROJECTILE_BOUNDS_MARGIN,
   PROJECTILE_MAX_LIFETIME_FRAMES, RECONNECT_WINDOW_SECONDS,
   walkStep, isSolid, isGrounded, groundDistance, ejectUp, computeTilt, Body,
   pointInBody,
@@ -467,8 +468,16 @@ export class GameRoom extends Room {
         }
       }
 
-      // Out of bounds
-      if (!collision && (proj.y < -50 || proj.y > MAP_HEIGHT + 50 || proj.x < -50 || proj.x > MAP_WIDTH + 50)) {
+      // Out of bounds. The ceiling is far higher than the other three, because
+      // a high lob's apex is well above the map and clipping it deletes the
+      // shot rather than bounding it — see PROJECTILE_CEILING.
+      if (
+        !collision &&
+        (proj.y < -PROJECTILE_CEILING ||
+          proj.y > MAP_HEIGHT + PROJECTILE_BOUNDS_MARGIN ||
+          proj.x < -PROJECTILE_BOUNDS_MARGIN ||
+          proj.x > MAP_WIDTH + PROJECTILE_BOUNDS_MARGIN)
+      ) {
         collision = { type: 'miss' as const, x: proj.x, y: proj.y };
       }
 
@@ -536,8 +545,13 @@ export class GameRoom extends Room {
           }
         }
 
-        // Always destroy terrain at impact point, regardless of collision type
-        this.destroyTerrain(collision.x, collision.y, weapon.craterRadius);
+        // A miss left the field; it did not land. Cratering there dug a hole at
+        // the map boundary and — for a shot that went out over the TOP — drew an
+        // explosion in the open sky. Terrain is destroyed where a shot actually
+        // hit something.
+        if (collision.type !== 'miss') {
+          this.destroyTerrain(collision.x, collision.y, weapon.craterRadius);
+        }
 
         // Where and what, nothing more. The damage this blast did travels as
         // synchronized health; repeating it here made the payload a second

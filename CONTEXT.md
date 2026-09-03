@@ -196,8 +196,9 @@ Projectiles are tested against the Drawn Body directly. A shot at head height th
 and a shot passing below the feet, inside the ground, does not. It was previously a circle centred
 on the feet, which got both of those backwards.
 
-The Drawn Body is **axis-aligned regardless of Chassis Tilt**. Tilt is what the character is drawn
-at and what its shot obeys; it does not rotate the box a projectile is tested against.
+The Drawn Body **leans with Chassis Tilt**, rotating about the Contact Point exactly as the sprite
+does. It is the thing players aim at, so it has to be the shape they see: a box that stayed level
+while the sprite leaned put the character's head most of a half-width away from where shots hit it.
 
 ### Step Window
 

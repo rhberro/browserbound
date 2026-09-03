@@ -433,6 +433,21 @@ describe('pointInBody', () => {
   // spans [y - PLAYER_HEIGHT, y] vertically and PLAYER_WIDTH centred on x.
   const feet = body(100, 100);
 
+  /** The drawn box's corners at a given tilt, in world space. */
+  function corners(b: Body, tilt: number): Array<[number, number]> {
+    const c = Math.cos(tilt);
+    const s = Math.sin(tilt);
+    return ([
+      [-PLAYER_WIDTH / 2, 0],
+      [PLAYER_WIDTH / 2, 0],
+      [PLAYER_WIDTH / 2, -PLAYER_HEIGHT],
+      [-PLAYER_WIDTH / 2, -PLAYER_HEIGHT],
+    ] as Array<[number, number]>).map(([x, y]) => [
+      b.x + x * c - y * s,
+      b.y + x * s + y * c,
+    ]);
+  }
+
   it('hits at head height', () => {
     expect(pointInBody(100, 66, feet)).toBe(true);
   });
@@ -465,5 +480,58 @@ describe('pointInBody', () => {
     expect(pointInBody(feet.x - PLAYER_WIDTH / 2, feet.y, feet)).toBe(true);
     expect(pointInBody(feet.x, feet.y - PLAYER_HEIGHT, feet)).toBe(true);
     expect(pointInBody(feet.x, feet.y - PLAYER_HEIGHT - 0.1, feet)).toBe(false);
+  });
+
+  it('is unchanged by an absent or zero tilt', () => {
+    const level = { x: 100, y: 100, tilt: 0 };
+    expect(pointInBody(100, 82, level)).toBe(pointInBody(100, 82, feet));
+    expect(pointInBody(120, 82, level)).toBe(pointInBody(120, 82, feet));
+  });
+
+  it('leans with the chassis: the head moves with the drawing', () => {
+    // At 20 degrees the drawn head is 11.6px outside the static box. A shot
+    // there struck the sprite and missed the character.
+    // The drawn top-right corner sits at (123.6, 70.3); the static box stops at
+    // x = 112, so this point is squarely in the sprite and outside the old box.
+    const tilted = { x: 100, y: 100, tilt: (20 * Math.PI) / 180 };
+    expect(pointInBody(118, 75, feet)).toBe(false); // old box: miss
+    expect(pointInBody(118, 75, tilted)).toBe(true); // leaning: hit
+  });
+
+  it('vacates the space the drawing has left', () => {
+    // The mirror of the above: straight up from the feet is inside a static box
+    // but outside a leaning one.
+    const tilted = { x: 100, y: 100, tilt: (45 * Math.PI) / 180 };
+    expect(pointInBody(100, 100 - 34, feet)).toBe(true);
+    expect(pointInBody(100, 100 - 34, tilted)).toBe(false);
+  });
+
+  it('contains its own corners at every tilt, and the contact point always', () => {
+    for (const deg of [-45, -20, 0, 20, 45, 80]) {
+      const tilt = (deg * Math.PI) / 180;
+      const b = { x: 100, y: 100, tilt };
+      expect({ deg, contact: pointInBody(b.x, b.y, b) }).toEqual({ deg, contact: true });
+      // The box centre in WORLD space — body-space (0, -H/2) rotated. Using
+      // (b.x, b.y - H/2) instead would only be the centre at tilt 0, and the
+      // nudge would push points out of the box rather than into it.
+      const cxCentre = b.x - (-PLAYER_HEIGHT / 2) * Math.sin(tilt);
+      const cyCentre = b.y + (-PLAYER_HEIGHT / 2) * Math.cos(tilt);
+      for (const [cx, cy] of corners(b, tilt)) {
+        // Nudge a hair inward so the check is not a floating-point edge case.
+        const ix = cx + (cxCentre - cx) * 0.001;
+        const iy = cy + (cyCentre - cy) * 0.001;
+        expect({ deg, inside: pointInBody(ix, iy, b) }).toEqual({ deg, inside: true });
+      }
+    }
+  });
+
+  it('rotates about the contact point, the way the sprite does', () => {
+    // PixiJS rotates the chassis about the container origin, which IS player.y.
+    // If the test rotated about the box centre instead, the feet would leave
+    // the box as soon as the character leaned.
+    for (const deg of [15, 30, 60]) {
+      const b = { x: 100, y: 100, tilt: (deg * Math.PI) / 180 };
+      expect({ deg, feetInside: pointInBody(100, 100, b) }).toEqual({ deg, feetInside: true });
+    }
   });
 });

@@ -43,6 +43,7 @@ the topmost solid row of the ground beneath it, so "grounded" is "the pixel at `
 **The box survives only as the drawn body.** `PLAYER_WIDTH` and `PLAYER_HEIGHT` describe what the
 character is rendered as and what a projectile is tested against (`pointInBody`), plus the headroom
 test that decides whether a space under a crater roof is worth standing in. They are not physics.
+It is an ORIENTED box, leaning with the chassis — see the amendment below.
 
 Locomotion collapses to one pair of numbers, the **Step Window**: scan the column one pixel ahead
 from `STEP_UP_LIMIT` above the feet to `STEP_DOWN_LIMIT` below, and take the first solid pixel that
@@ -110,3 +111,32 @@ ADR 0003 for what tilt then does to aim.
 
 Terrain itself is unaffected: it still lives on the server as a per-pixel mask replayed to clients
 as an ops log (ADR 0002), and this decision only changes how a character reads it.
+
+## Amendment — the drawn body is oriented, not axis-aligned
+
+Accepted — 2026-09-03, superseding this ADR's original "axis-aligned regardless of tilt".
+
+The first version of this decision kept the drawn body axis-aligned and argued that "the collision
+test must agree with the box, not the drawing." That argument was inherited from the swept-box era
+and does not survive the decision above.
+
+While the box was also the physics body, axis-alignment bought something real: an oriented box has
+to be swept against the terrain mask, which is materially harder than an AABB. Once terrain contact
+became a point, the box was left with exactly one job — being the thing players aim at — and for
+that job the only question is whether the hit target agrees with the picture. A static box does not.
+The chassis is drawn rotated by `player.tilt`, so at 10° of tilt the drawn head is already 6px
+outside a level box, and at 20° it is 11.6px, most of a half-width. Characters were shot in a box
+their sprite had visibly left, and shots that visibly struck the head passed through it.
+
+So `pointInBody` rotates the query point by minus the tilt about the contact point and runs the same
+box test in the body's own frame. This costs six lines and two trig calls, and it is free at the
+edges: the pivot already matches (PixiJS rotates the chassis about the container origin, which *is*
+`player.y`), `tilt` is already synchronized, and tilt is zero while airborne, so the test degenerates
+to the old one exactly.
+
+The one hazard considered and dismissed: at high tilt the box's lower corner dips below the contact
+point, into the ground. Nothing can hit it, because the projectile ray-march tests terrain before
+players and stops at the first solid pixel.
+
+This also converges with GunBound, whose `CollisionBox` is likewise an oriented rectangle that
+rotates with the mobile and likewise never touches terrain.

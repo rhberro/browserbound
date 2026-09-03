@@ -89,7 +89,7 @@ export const WALK_WINDUP_MS = 100;
  * GunBound gives each mobile 90-100. Ours was 250px at double the pace, which
  * is a large part of why walking read as slidey rather than deliberate. TUNE.
  */
-export const MOVE_STEPS = 100;
+export const MOVE_STEPS = 300;
 
 /**
  * How long a character hangs before gravity engages, in ms. What makes ground
@@ -140,6 +140,24 @@ export const TURN_TIME_MS = 30000;
  * and the opponent is waiting the entire time.
  */
 export const RECONNECT_WINDOW_SECONDS = 30;
+
+/**
+ * How far ABOVE the map a projectile may fly before it counts as gone.
+ *
+ * Deliberately huge, and deliberately not the same as the side and bottom
+ * bounds. A high lob is a core artillery shot, and its apex is `v^2 / 2g` above
+ * the muzzle — at full power that is 1125px, more than the map is tall. A tight
+ * ceiling does not merely clip those shots, it deletes them mid-flight: every
+ * high-angle shot above roughly 87 power used to die in the air. GunBound
+ * allows 300px for the same reason (`ProjectilePlayableMapAreaYLimit`); ours is
+ * larger because our shots are faster relative to the map.
+ *
+ * The sides and floor stay tight: leaving them really is leaving the field.
+ */
+export const PROJECTILE_CEILING = 2000;
+
+/** Margin outside the map's sides and floor before a projectile is gone. */
+export const PROJECTILE_BOUNDS_MARGIN = 50;
 
 /**
  * Hard cap on how long a single projectile may stay in the air, in simulation
