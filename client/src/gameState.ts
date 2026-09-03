@@ -1,20 +1,44 @@
 import { Client, Room } from 'colyseus.js';
 import {
-  PlayerState,
-  TurnState,
+  PlayerView,
+  TurnView,
+  RoomState,
+  Player,
   TerrainOp,
   RECONNECT_WINDOW_SECONDS,
 } from '@browserbond/shared';
 
+/**
+ * Copy the fields the client is allowed to read off a synchronized Player.
+ *
+ * A plain object rather than the schema instance itself: the renderer
+ * interpolates and mutates its own view of position, and writing back into
+ * synchronized state would be the client pretending to be authoritative. The
+ * PlayerView type is derived from the schema, so a field renamed on the server
+ * fails to compile here.
+ */
+function snapshot(player: Player): PlayerView {
+  return {
+    id: player.id,
+    x: player.x,
+    y: player.y,
+    health: player.health,
+    facing: player.facing || 1,
+    movementBudget: player.movementBudget,
+    airborne: player.airborne,
+    tilt: player.tilt,
+    aimAngle: player.aimAngle,
+    connected: player.connected,
+  };
+}
+
 export class GameState {
   private client: Client;
-  private room: Room | null = null;
-  public players: Map<string, PlayerState> = new Map();
-  public turnState: TurnState | null = null;
-  public currentProjectile: { x: number; y: number } | null = null;
+  private room: Room<RoomState> | null = null;
+  public players: Map<string, PlayerView> = new Map();
+  public turnState: TurnView | null = null;
   public projectiles: Map<string, { x: number; y: number }> = new Map();
   public collision: { type: string; x: number; y: number; time: number } | null = null;
-  public currentPlayerAimAngle: number = 45;
   public onTerrainOp: ((op: TerrainOp) => void) | null = null;
 
   /**
@@ -108,30 +132,14 @@ export class GameState {
     }
 
     if (this.room?.state && this.room.state.players) {
-      this.room.state.players.onAdd((player: any, key: string) => {
-        this.players.set(key, {
-          id: key,
-          x: player.x,
-          y: player.y,
-          health: player.health,
-          currentlyAiming: false,
-          facing: player.facing || 1,
-          connected: player.connected !== false,
-        });
-
+      this.room.state.players.onAdd((player: Player, key: string) => {
+        this.players.set(key, snapshot(player));
         player.onChange(() => {
-          const p = this.players.get(key);
-          if (p) {
-            p.x = player.x;
-            p.y = player.y;
-            p.health = player.health;
-            p.facing = player.facing;
-            p.connected = player.connected !== false;
-          }
+          this.players.set(key, snapshot(player));
         });
       });
 
-      this.room.state.players.onRemove((player: any, key: string) => {
+      this.room.state.players.onRemove((_player: Player, key: string) => {
         this.players.delete(key);
       });
     }
@@ -274,12 +282,6 @@ export class GameState {
       }
     });
 
-    this.room.onMessage('hit', (data) => {
-      if (this.onPlayerHit) {
-        this.onPlayerHit(data.targetId, data.health);
-      }
-    });
-
     this.room.onMessage('terrainSync', (data: { mapId?: string; ops: TerrainOp[] }) => {
       // Map first, ops second: the renderer holds its op queue until the map
       // has been painted, so craters land on top of the ground, not under it.
@@ -307,10 +309,6 @@ export class GameState {
       }
     });
 
-    this.room.onMessage('aimAngle', (data) => {
-      this.currentPlayerAimAngle = data.angle;
-    });
-
     this.room.onMessage('windChanged', (data) => {
       if (this.turnState) {
         this.turnState.windSpeed = data.windSpeed;
@@ -321,10 +319,12 @@ export class GameState {
 
   private updateTurnState() {
     if (!this.room?.state) return;
+    const state = this.room.state;
     this.turnState = {
-      currentPlayerId: this.room.state.currentPlayerId,
-      windSpeed: this.room.state.windSpeed,
-      windDirection: this.room.state.windDirection,
+      currentPlayerId: state.currentPlayerId,
+      windSpeed: state.windSpeed,
+      windDirection: state.windDirection,
+      turnEndsAt: state.turnEndsAt,
     };
   }
 

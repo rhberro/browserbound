@@ -1,5 +1,4 @@
 import { Room, Client } from 'colyseus';
-import { Schema, type, MapSchema } from '@colyseus/schema';
 import {
   GRAVITY, WIND_INTEGRATION, TerrainOp, MAP_WIDTH, MAP_HEIGHT,
   DEFAULT_CRATER_RADIUS, applyOpToBitmap, collapseLips, PLAYER_HEIGHT,
@@ -7,6 +6,7 @@ import {
   PROJECTILE_MAX_LIFETIME_FRAMES, RECONNECT_WINDOW_SECONDS,
   walkStep, settle, testCollisionY, pushOutOfWall, airborneHorizontal, computeTilt, Body,
   worldFiringAngle, clampAimDeg, degToRad,
+  Player, RoomState,
 } from '@browserbond/shared';
 import { PhysicsAdapter, Wind } from '@browserbond/shared/src/adapters/PhysicsAdapter';
 import { MessageValidationAdapter } from '@browserbond/shared/src/adapters/MessageValidationAdapter';
@@ -20,49 +20,6 @@ import {
   knockbackImpulse,
 } from '@browserbond/shared/src/adapters/WeaponConfigAdapter';
 
-
-class Player extends Schema {
-  @type('string') id = '';
-  @type('number') x = 0;
-  @type('number') y = 0;
-  @type('number') vx = 0;
-  @type('number') vy = 0;
-  @type('number') health = 100;
-  @type('number') facing = 1; // 1 = direita, -1 = esquerda
-  /** Pixels of walking left this turn. Spent per pixel actually advanced. */
-  @type('number') movementBudget = 0;
-  /** Falling. Walking and airborne motion obey different rules. */
-  @type('boolean') airborne = false;
-  /** Chassis tilt in radians. Calculated from terrain under the character. Zero when airborne. */
-  @type('number') tilt = 0;
-  /** Aim angle in radians, measured RELATIVE TO THE CHASSIS, clamped to [AIM_MIN_DEG, AIM_MAX_DEG]. */
-  @type('number') aimAngle = 0;
-  /**
-   * False while this player's connection is dropped and their reconnection
-   * window is still open. Synchronized so the opponent sees a character marked
-   * as reconnecting rather than one that is idle for no reason, or one that
-   * vanishes and comes back.
-   */
-  @type('boolean') connected = true;
-}
-
-class Projectile extends Schema {
-  @type('number') x = 0;
-  @type('number') y = 0;
-  @type('number') vx = 0;
-  @type('number') vy = 0;
-  @type('string') firedBy = '';
-}
-
-class GameState extends Schema {
-  @type('string') currentPlayerId = '';
-  @type('number') windSpeed = 5;
-  @type('number') windDirection = 0;
-  /** Epoch ms at which the current turn passes if nobody fires. */
-  @type('number') turnEndsAt = 0;
-  @type({ map: Player }) players = new MapSchema<Player>();
-  projectile: Projectile | null = null;
-}
 
 class GameProjectile {
   x: number;
@@ -102,7 +59,7 @@ const WALK_PX_PER_MS = WALK_SPEED / 1000;
 /** Fixed simulation tick, matching setSimulationInterval below. */
 const SIMULATION_INTERVAL_MS = 16;
 
-export class GameRoom extends Room<GameState> {
+export class GameRoom extends Room<RoomState> {
   maxClients = 2;
   private terrainBitmap: Uint8Array = new Uint8Array(MAP_WIDTH * MAP_HEIGHT);
   private terrainOps: TerrainOp[] = [];
@@ -145,7 +102,7 @@ export class GameRoom extends Room<GameState> {
   }
 
   onCreate() {
-    this.setState(new GameState());
+    this.setState(new RoomState());
 
     // Initialize adapters
     this.physics = new PhysicsAdapter({

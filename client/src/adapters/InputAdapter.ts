@@ -9,6 +9,8 @@
  * - Movement and fire actions
  */
 
+import type { GameState } from '../gameState';
+
 /** How fast the power gauge fills, in percent per second. */
 const CHARGE_RATE_PER_SECOND = 40;
 
@@ -26,7 +28,7 @@ export class InputAdapter {
   private selectedWeapon: number = 1; // 1 = normal, 2 = burst, 3 = shotgun
   private lastMoveUpdate: number = 0;
 
-  constructor(private gameState: any) {}
+  constructor(private gameState: GameState) {}
 
   /**
    * Register keyboard event listeners.

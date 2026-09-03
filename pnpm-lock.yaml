@@ -23,6 +23,9 @@ importers:
       '@browserbond/shared':
         specifier: workspace:*
         version: link:../shared
+      '@colyseus/schema':
+        specifier: ^2.0.0
+        version: 2.0.37
       '@preact/signals':
         specifier: ^2.11.1
         version: 2.11.1(preact@10.29.8)
@@ -87,6 +90,10 @@ importers:
         version: 5.9.3
 
   shared:
+    dependencies:
+      '@colyseus/schema':
+        specifier: ^2.0.0
+        version: 2.0.37
     devDependencies:
       typescript:
         specifier: ^5.3.0

@@ -9,7 +9,8 @@
  */
 
 import * as PIXI from 'pixi.js';
-import { MAP_WIDTH, MAP_HEIGHT } from '@browserbond/shared';
+import { MAP_WIDTH, MAP_HEIGHT, PlayerView } from '@browserbond/shared';
+import type { GameState } from '../gameState';
 
 export class CameraAdapter {
   private cameraX: number = 1000;
@@ -23,7 +24,7 @@ export class CameraAdapter {
   /**
    * Update camera position to track projectiles or current player.
    */
-  update(gameState: any): void {
+  update(gameState: GameState): void {
     // Focus on projectiles if any are in flight, otherwise focus on current player
     if (gameState.projectiles.size > 0) {
       const firstProj = gameState.projectiles.values().next().value;
@@ -53,7 +54,7 @@ export class CameraAdapter {
   /**
    * Get the current player (whose turn it is).
    */
-  private getCurrentPlayer(gameState: any): any {
+  private getCurrentPlayer(gameState: GameState): PlayerView | null {
     if (!gameState.turnState) return null;
     return gameState.players.get(gameState.turnState.currentPlayerId) || null;
   }

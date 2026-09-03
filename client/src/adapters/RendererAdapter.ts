@@ -10,7 +10,8 @@
  */
 
 import * as PIXI from 'pixi.js';
-import { TerrainOp } from '@browserbond/shared';
+import { TerrainOp, PlayerView } from '@browserbond/shared';
+import type { GameState } from '../gameState';
 import { TerrainSurface } from '../rendering/TerrainSurface';
 import { PlayerMotion } from '../rendering/PlayerMotion';
 import type { AimState } from './InputAdapter';
@@ -69,7 +70,7 @@ export class RendererAdapter {
   /**
    * Update all player sprites and health bars.
    */
-  updatePlayers(gameState: any, aimState?: any): void {
+  updatePlayers(gameState: GameState, aimState?: AimState): void {
     const now = performance.now();
     // Clamped so a backgrounded tab doesn't produce one enormous smoothing step.
     const dtMs = Math.min(100, Math.max(0, now - this.lastFrameTime));
@@ -137,7 +138,7 @@ export class RendererAdapter {
   /**
    * Create a player sprite with health bar.
    */
-  private createPlayerSprite(playerId: string, gameState: any): PIXI.Container {
+  private createPlayerSprite(playerId: string, gameState: GameState): PIXI.Container {
     const container = new PIXI.Container();
     container.name = `player_${playerId}`;
 
@@ -167,7 +168,12 @@ export class RendererAdapter {
   /**
    * Update aim angle indicator arrow for current player.
    */
-  private updateAngleIndicator(playerId: string, player: any, gameState: any, aimState?: any): void {
+  private updateAngleIndicator(
+    playerId: string,
+    player: PlayerView,
+    gameState: GameState,
+    aimState?: AimState
+  ): void {
     const isCurrentPlayer = playerId === gameState.turnState?.currentPlayerId;
 
     if (isCurrentPlayer) {
@@ -231,7 +237,7 @@ export class RendererAdapter {
   /**
    * Update projectile graphics.
    */
-  updateProjectiles(gameState: any): void {
+  updateProjectiles(gameState: GameState): void {
     // Remove graphics for projectiles that no longer exist
     for (const [projId, graphics] of this.projectileGraphicsMap) {
       if (!gameState.projectiles.has(projId)) {
@@ -261,7 +267,7 @@ export class RendererAdapter {
   /**
    * Render aim line (while charging).
    */
-  renderAimLine(myPlayer: any, aimState: AimState): void {
+  renderAimLine(myPlayer: PlayerView | null, aimState: AimState): void {
     if (aimState.isCharging && myPlayer) {
       if (this.aimLine) {
         this.container.removeChild(this.aimLine);
@@ -310,7 +316,7 @@ export class RendererAdapter {
   /**
    * Render explosion animation.
    */
-  renderExplosion(collision: any): void {
+  renderExplosion(collision: { type: string; x: number; y: number; time: number } | null): void {
     if (collision) {
       const now = Date.now();
       const explosionElapsed = now - collision.time;

@@ -1,19 +1,9 @@
-export interface PlayerState {
-  id: string;
-  x: number;
-  y: number;
-  health: number;
-  currentlyAiming: boolean;
-  facing: number; // 1 = direita, -1 = esquerda
-  /** False while this player is inside their reconnection window. */
-  connected: boolean;
-}
-
-export interface TurnState {
-  currentPlayerId: string;
-  windSpeed: number;
-  windDirection: number;
-}
+/**
+ * PlayerState and TurnState used to live here as hand-written mirrors of the
+ * synchronized schema. They are now PlayerView and TurnView in ./schema, DERIVED
+ * from the schema classes with Pick, so the client stops compiling when a field
+ * it consumes moves. See that file for why.
+ */
 
 export interface Projectile {
   x: number;
