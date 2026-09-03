@@ -38,14 +38,18 @@ const EXPLOSION_MAX_RADIUS = 40;
 const AIM_LENGTH = 100;
 
 /**
- * How far out from the chassis centre BOTH aim visuals start.
+ * How far out from the character the aim visuals start, measured from the feet
+ * along the firing direction.
  *
- * A little over half the body width, so they clear the sprite instead of being
- * drawn through it and the character stays readable while aiming. Shared by the
- * aim gauge and the angle arrow deliberately: they are two halves of one
+ * Must clear the drawn body even for a near-vertical shot: the body is
+ * PLAYER_HEIGHT tall, so a small fixed offset (the old 22) starts the indicator
+ * inside the sprite on an upward aim and reads as coming from the character's
+ * centre. PLAYER_HEIGHT plus a margin clears the head with a visible gap on any
+ * angle; a level shot simply has a bigger margin, which reads fine. Shared by
+ * the aim gauge and the angle arrow deliberately: they are two halves of one
  * indicator, and a gap on only one of them looks like a bug. TUNE.
  */
-const AIM_MUZZLE_OFFSET = 22;
+const AIM_MUZZLE_OFFSET = PLAYER_HEIGHT + 8;
 
 /** Length of the on-character aim arrow, in pixels. */
 const AIM_ARROW_LENGTH = 35;

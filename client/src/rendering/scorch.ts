@@ -22,10 +22,10 @@
  *     match.
  *
  * This module holds the GEOMETRY — which pixels darken and by how much.
- * `TerrainSurface` paints it, and the paint order there (scorch first, then
- * erase) is what keeps the burn a ring rather than a bite: the scorch disc
- * covers the crater as well as the band, and the erase cuts the crater back
- * out of it.
+ * `TerrainSurface` paints it into a separate layer that is composited over the
+ * terrain with a multiply blend and clipped by the terrain's alpha, so a burn
+ * only shows where terrain actually is. The disc covers the crater as well as
+ * the band; the crater is erased out of the terrain underneath it.
  */
 
 import { TerrainOp } from '@browserbond/shared';
@@ -54,8 +54,6 @@ export interface ScorchDisc {
   y: number;
   /** Erased radius plus the band — the crater's own area is erased after. */
   radius: number;
-  /** Multiplier applied to whatever brightness is already there. */
-  brightness: number;
 }
 
 /**
@@ -76,6 +74,5 @@ export function scorchDiscFor(op: TerrainOp): ScorchDisc | null {
     x: op.x,
     y: op.y,
     radius: op.radius + SCORCH_BAND_WIDTH,
-    brightness: SCORCH_BRIGHTNESS,
   };
 }
