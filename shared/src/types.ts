@@ -56,26 +56,36 @@ export const PLAYER_WIDTH = 24;
 export const PLAYER_HEIGHT = 36;
 
 /**
- * Steepest slope a character can walk up, in degrees.
+ * Steepest CONTINUOUS SLOPE a character can walk up, in degrees.
  *
- * This is the number to tune when climbing feels wrong — everything else is
- * derived from it. An axis-aligned body probes HALF_WIDTH ahead, so to advance
- * one pixel up a slope of gradient `g` it must lift `HALF_WIDTH * g`. Inverting
- * that gives the climb limit below. TUNE.
+ * This is the number to tune when climbing feels wrong. It is enforced
+ * directly, by `tooSteepToClimb` measuring the surface as a secant across the
+ * body width — not inferred from `CLIMB_LIMIT`, which cannot express it.
+ *
+ * The two are genuinely different questions and used to be one, which is why
+ * the advertised angle bore no relation to the angle characters achieved. A
+ * per-step lift budget bounds how tall a STEP is, and a slope is not a step: on
+ * a continuous incline the body only ever lifts `tan(angle)` per pixel
+ * travelled, roughly 4px at this angle, so a 45px budget waved through cliffs
+ * at 85 degrees. Bounding the slope by shrinking that budget instead would
+ * forbid stepping over a 5px pebble. Measure the two separately. TUNE.
  */
 export const MAX_CLIMB_ANGLE_DEG = 75;
 
+/** MAX_CLIMB_ANGLE_DEG as a gradient (rise over run). DERIVED. */
+export const MAX_CLIMB_GRADIENT = Math.tan((MAX_CLIMB_ANGLE_DEG * Math.PI) / 180);
+
 /**
- * Greatest rise a character may climb per 1px of horizontal travel.
+ * Greatest STEP a character may climb per 1px of horizontal travel — a ledge, a
+ * crater lip, a pebble — independent of how steep the ground it is walking on
+ * is. That is `MAX_CLIMB_ANGLE_DEG`'s job.
  *
- * DERIVED from MAX_CLIMB_ANGLE_DEG — do not tune this directly. At a 24px body
- * and 75 degrees that is 45px, which is larger than it looks: it is the
- * transient lift needed to get the leading edge over the slope, not the height
- * gained per step (that is just the gradient).
+ * It is the transient lift needed to get the leading edge over an obstacle, not
+ * the height gained per step, which is why it is so much larger than a stride:
+ * an axis-aligned body probes HALF_WIDTH ahead. Sized a little above the body's
+ * own height so a character can climb out of a crater it fell into. TUNE.
  */
-export const CLIMB_LIMIT = Math.round(
-  (PLAYER_WIDTH / 2) * Math.tan((MAX_CLIMB_ANGLE_DEG * Math.PI) / 180)
-);
+export const CLIMB_LIMIT = 45;
 
 /**
  * Greatest drop a character will follow rather than walk off into a fall, and

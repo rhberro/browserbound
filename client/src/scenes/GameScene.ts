@@ -70,6 +70,11 @@ export class GameScene {
   }
 
   update(deltaMS: number) {
+    // First: release anything a shot did whose drawn moment has arrived. Ahead
+    // of everything else in the frame so the explosion and the crater are in
+    // place before the projectile that caused them is drawn one last time.
+    this.gameState.advanceShotClock(performance.now());
+
     // Update input state
     this.inputAdapter.update(deltaMS);
 

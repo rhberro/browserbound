@@ -1,4 +1,4 @@
-import { StatusPill } from './components/StatusPill';
+import { WindDial } from './components/WindDial';
 import { ConnectionBanner } from './components/ConnectionBanner';
 import { MatchResult } from './components/MatchResult';
 import { AngleControl } from './components/AngleControl';
@@ -24,7 +24,7 @@ export function HudRoot({ gameState }: { gameState: GameState }) {
       <MatchResult gameState={gameState} />
 
       <div>
-        <StatusPill />
+        <WindDial />
         <ConnectionBanner />
       </div>
 

@@ -21,6 +21,7 @@ import {
 import type { GameState } from '../gameState';
 import { TerrainSurface } from '../rendering/TerrainSurface';
 import { PlayerMotion } from '../rendering/PlayerMotion';
+import { SHOT_DELAY_MS } from '../rendering/ShotClock';
 import type { AimState } from './InputAdapter';
 
 /** Health bar geometry, in pixels, measured from the top of the body. */
@@ -31,6 +32,19 @@ const HEALTH_BAR_GAP = 8;
 /** Radius the impact flash reaches at the end of its animation, in pixels. */
 const EXPLOSION_MAX_RADIUS = 40;
 
+/** Length of the aim gauge, measured from the muzzle outward. */
+const AIM_LENGTH = 100;
+
+/**
+ * How far out from the chassis centre BOTH aim visuals start.
+ *
+ * A little over half the body width, so they clear the sprite instead of being
+ * drawn through it and the character stays readable while aiming. Shared by the
+ * aim gauge and the angle arrow deliberately: they are two halves of one
+ * indicator, and a gap on only one of them looks like a bug. TUNE.
+ */
+const AIM_MUZZLE_OFFSET = 22;
+
 /** Length of the on-character aim arrow, in pixels. */
 const AIM_ARROW_LENGTH = 35;
 
@@ -40,16 +54,29 @@ const AIM_ARROW_LENGTH = 35;
  * Called ONCE per indicator. Direction and position are then transforms on the
  * resulting object, so the geometry is never re-triangulated.
  */
-function buildArrow(graphics: PIXI.Graphics, length: number, width: number, color: number): void {
-  graphics.moveTo(0, 0);
-  graphics.lineTo(length, 0);
+/**
+ * An arrow along +x, from `start` to `start + length`.
+ *
+ * `start` is the muzzle gap: the shaft begins out from the origin rather than
+ * at it, so the arrow points out of the character instead of through it.
+ */
+function buildArrow(
+  graphics: PIXI.Graphics,
+  start: number,
+  length: number,
+  width: number,
+  color: number
+): void {
+  const tip = start + length;
+  graphics.moveTo(start, 0);
+  graphics.lineTo(tip, 0);
   graphics.stroke({ width, color });
 
   const head = 8;
   const spread = (Math.PI * 5) / 6;
   for (const a of [spread, -spread]) {
-    graphics.moveTo(length, 0);
-    graphics.lineTo(length + Math.cos(a) * head, -Math.sin(a) * head);
+    graphics.moveTo(tip, 0);
+    graphics.lineTo(tip + Math.cos(a) * head, -Math.sin(a) * head);
   }
   graphics.stroke({ width, color });
 }
@@ -106,8 +133,13 @@ export class RendererAdapter {
    * Separate track set for projectiles. Same interpolation, but its own
    * instance so a projectile id can never collide with a session id, and so
    * clearing one does not disturb the other.
+   *
+   * It runs on the SHOT clock, not the character one. Everything else a shot
+   * does — its explosion, its crater, its disappearance — is held back by the
+   * same `SHOT_DELAY_MS` in `GameState`, so the flight and the impact describe
+   * one instant. Give this its own delay and they part company again.
    */
-  private projectileMotion: PlayerMotion = new PlayerMotion();
+  private projectileMotion: PlayerMotion = new PlayerMotion(SHOT_DELAY_MS);
   private lastProjectileFrameTime: number = performance.now();
   private lastFrameTime: number = performance.now();
   private localPlayerId: string | null = null;
@@ -333,7 +365,7 @@ export class RendererAdapter {
       // once, along +x, and thereafter moved and rotated. Transform changes are
       // exactly what PixiJS exempts from the don't-rebuild rule.
       const arrow = new PIXI.Graphics();
-      buildArrow(arrow, AIM_ARROW_LENGTH, 3, 0xffff00);
+      buildArrow(arrow, AIM_MUZZLE_OFFSET, AIM_ARROW_LENGTH, 3, 0xffff00);
       this.layers.aim.addChild(arrow);
       sprite.angleIndicator = arrow;
     }
@@ -452,26 +484,43 @@ export class RendererAdapter {
       }
       this.aimLine.clear();
 
-      const aimLength = 100;
       const worldAngle = this.aimDirection(this.localPlayerId, myPlayer, aimState);
 
-      // Anchor to the rendered position so the line starts on the sprite.
+      // Anchor to the rendered position, so the gauge follows the sprite rather
+      // than the raw server position it is smoothing toward.
       const origin =
         (this.localPlayerId ? this.motion.getRendered(this.localPlayerId) : null) ??
         { x: myPlayer.x, y: myPlayer.y };
 
+      // The gauge is translated out along the firing direction rather than
+      // starting at the body centre, leaving the character visible under it —
+      // the whole line used to be drawn through the middle of the sprite. It is
+      // moved, not lengthened: the far end sits AIM_LENGTH from the muzzle, so
+      // a full power bar is the same length it always was and still reads as
+      // the same power.
+      //
+      // Offsetting along the firing direction is what keeps this correct on a
+      // slope and when facing left. `worldAngle` has already been through the
+      // shared aim transform, which is the one place the chassis tilt and the
+      // facing mirror are composed in the right order; a screen-horizontal
+      // offset would sit inside the sprite on any incline.
+      const cos = Math.cos(worldAngle);
+      const sin = Math.sin(worldAngle);
+      const muzzleX = origin.x + cos * AIM_MUZZLE_OFFSET;
+      const muzzleY = origin.y - sin * AIM_MUZZLE_OFFSET;
+
       // Full aim line (white)
-      const endX = origin.x + Math.cos(worldAngle) * aimLength;
-      const endY = origin.y - Math.sin(worldAngle) * aimLength;
-      this.aimLine.moveTo(origin.x, origin.y);
+      const endX = muzzleX + cos * AIM_LENGTH;
+      const endY = muzzleY - sin * AIM_LENGTH;
+      this.aimLine.moveTo(muzzleX, muzzleY);
       this.aimLine.lineTo(endX, endY);
       this.aimLine.stroke({ width: 3, color: 0xffffff });
 
       // Power line (green, shorter)
-      const powerPercent = (aimState.power / 100) * aimLength;
-      const powerEndX = origin.x + Math.cos(worldAngle) * powerPercent;
-      const powerEndY = origin.y - Math.sin(worldAngle) * powerPercent;
-      this.aimLine.moveTo(origin.x, origin.y);
+      const powerLength = (aimState.power / 100) * AIM_LENGTH;
+      const powerEndX = muzzleX + cos * powerLength;
+      const powerEndY = muzzleY - sin * powerLength;
+      this.aimLine.moveTo(muzzleX, muzzleY);
       this.aimLine.lineTo(powerEndX, powerEndY);
       this.aimLine.stroke({ width: 5, color: 0x00ff00 });
     } else if (this.aimLine) {

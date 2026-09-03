@@ -20,6 +20,24 @@ Projectiles travel as **synchronized state**, like every other moving thing. App
 is the shot being fired and leaving it is the shot being over. The impact itself stays a message,
 because it is an event rather than continuous state.
 
+### Shot Clock
+
+The **Shot Clock** is the single timeline every part of a shot is shown on: its flight, its
+explosion, the crater it leaves, any death it causes, and its own disappearance.
+
+It exists because those two halves arrive differently. A position is state, delivered at the patch
+rate, so it is played back slightly behind live in order to have a sample on each side to interpolate
+between. An impact is a message, true the moment it arrives. Shown on their own clocks, both are
+correct and neither agrees with the other: the drawn projectile is a delay's worth of flight short of
+the ground when its explosion goes off ahead of it. The fix is not better positions — it is one
+clock, with the delay paid once by the whole shot.
+
+The client cannot simply drop the delay and draw shots live, because terrain lives only on the server
+(ADR 0002): a client predicting the flight itself has nothing to stop the projectile and would sail
+it through the ground. What it can do is close the gap at the end — the impact message carries the
+exact point of contact, which becomes the flight's final position, so the projectile arrives rather
+than stopping wherever the last patch left it.
+
 ### Wind
 
 **Wind** is an environmental force that affects all active projectiles. It has:
@@ -160,8 +178,24 @@ with the box, not the drawing.
 
 ### Climb Angle
 
-The **Climb Angle** is the steepest slope a character can walk up. It is the game's definition of
-"too steep", and everything else about climbing follows from it.
+The **Climb Angle** is the steepest continuous slope a character can walk up. It is the game's
+definition of "too steep".
+
+It is measured, not inferred: the surface under the feet against the surface one body width further
+along, taken in the direction of travel. The run length is what makes the measurement mean anything,
+because it is the only thing that tells a slope from a step — a ledge rises by a fixed amount however
+far you measure, while an incline's rise grows with the run.
+
+### Step-Up Limit
+
+The **Step-Up Limit** is the tallest single obstacle a character can lift itself over in one pixel of
+travel: a ledge, a crater lip, a pebble.
+
+It is deliberately *not* the Climb Angle, and the two cannot be collapsed into one number. On a
+continuous slope a body only ever rises by the gradient per pixel travelled — a few pixels, even on a
+steep hill — so a Step-Up Limit generous enough to clear a ledge waves cliffs through, and one tight
+enough to refuse a cliff forbids stepping over a pebble. One number cannot answer both questions, and
+when it was asked to, characters walked up sheer walls while gentle hills stopped them.
 
 ### Step-Down Limit
 

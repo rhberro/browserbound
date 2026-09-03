@@ -15,7 +15,15 @@
  *   this is removing.
  */
 
-/** Roughly two patch intervals at the server's 20Hz patch rate. */
+/**
+ * Default playback delay: roughly two patch intervals at the server's 20Hz
+ * patch rate. Generous on purpose for characters, where a late sample matters
+ * more than the delay does.
+ *
+ * Projectiles override it — see `SHOT_DELAY_MS`. A shot is watched frame by
+ * frame and its delay is felt as input lag on the fire button, so it buys the
+ * least buffering that still brackets `renderTime`.
+ */
 export const INTERP_DELAY_MS = 100;
 
 /** Samples older than this behind the render time are dropped. */
@@ -56,6 +64,12 @@ interface Track {
 
 export class PlayerMotion {
   private tracks: Map<string, Track> = new Map();
+
+  /**
+   * @param delayMs how far behind live remote tracks are played back. The local
+   *   player is never delayed, so this does not touch it.
+   */
+  constructor(private readonly delayMs: number = INTERP_DELAY_MS) {}
 
   /**
    * Feed the latest server position for a player and get back the position to
@@ -122,7 +136,7 @@ export class PlayerMotion {
       return { x: track.x, y: track.y };
     }
 
-    const renderTime = now - INTERP_DELAY_MS;
+    const renderTime = now - this.delayMs;
     const at = this.sampleAt(track.samples, renderTime);
     track.x = at.x;
     track.y = at.y;

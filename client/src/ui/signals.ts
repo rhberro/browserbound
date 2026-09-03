@@ -3,6 +3,7 @@ import type { GameState } from '../gameState';
 import type { AimState, InputAdapter } from '../adapters/InputAdapter';
 import { MOVE_BUDGET } from '@browserbond/shared';
 import { readLastShotValue, writeLastShotValue } from './lastShotStore';
+import { windRotationDeg } from './windDialGeometry';
 
 /**
  * The single boundary between the imperative game loop and the declarative HUD.
@@ -58,8 +59,16 @@ export const lastAngleText = computed(() => `Last: ${lastAngle.value.toFixed(0)}
 export const powerText = computed(() => `${power.value.toFixed(0)}%`);
 export const lastPowerText = computed(() => `Last: ${lastPower.value.toFixed(0)}%`);
 
-/** windSpeed is magnitude * 100 and magnitude maxes out at 0.5, so 0-50 maps to 0-100%. */
-export const windText = computed(() => `${Math.round((windSpeed.value / 50) * 100)}%`);
+/**
+ * Wind as the bare number the dial shows.
+ *
+ * `windSpeed` is the simulation's magnitude scaled by 100, so it spans the
+ * WindManager's 0.1-0.5 range as 10-50. Shown as that integer rather than as a
+ * percentage of the maximum: a dial reads as a measurement, and "34" is a
+ * quantity a player learns the feel of, where "68%" invites them to wonder
+ * 68% of what.
+ */
+export const windValueText = computed(() => `${Math.round(windSpeed.value)}`);
 
 /**
  * Movement Budget as a percentage of a full turn's allowance, for the bar, and
@@ -133,8 +142,19 @@ export const isTurnEnding = computed(() => isMyTurn.value && turnSeconds.value >
  *  node and re-renders no component at all. */
 export const powerFillStyle = computed(() => `width:${power.value}%`);
 export const lastPowerStyle = computed(() => `width:${lastPower.value}%`);
+/**
+ * The needle's rotation.
+ *
+ * A straight degrees conversion, and it must stay one. Wind pushes a projectile
+ * by `vx += magnitude * cos(angle)`, `vy += magnitude * sin(angle)` in a frame
+ * where y grows DOWNWARD, which is exactly what a CSS rotation measures:
+ * clockwise from pointing right. So heading zero is a needle pointing right and
+ * a shot drifting right. Negating the angle, or offsetting it to put zero at
+ * the top, would mirror the dial against the drift it describes — and a wind
+ * indicator that points the wrong way is worse than none.
+ */
 export const windArrowStyle = computed(
-  () => `transform:rotate(${((windDirection.value * 180) / Math.PI).toFixed(1)}deg)`
+  () => `transform:rotate(${windRotationDeg(windDirection.value).toFixed(1)}deg)`
 );
 
 // Charge-edge tracking for the "last used" readouts. Both values are captured

@@ -29,6 +29,7 @@ import {
   AIRBORNE_CLIMB_MAX,
   AIRBORNE_CLIMB_DAMP,
   WALL_ELASTICITY,
+  MAX_CLIMB_GRADIENT,
 } from './types';
 import { MAP_WIDTH, MAP_HEIGHT } from './terrain';
 
@@ -117,13 +118,60 @@ export function testCollisionY(
 }
 
 /**
+ * Does terrain intrude into the body's box?
+ *
+ * This is the "is it stuck" question, and it is deliberately NOT "is it
+ * standing on something". The FOOT ROW is excluded, because a body resting on
+ * ground has solid pixels directly under its feet by definition — that is what
+ * standing IS. Everything strictly above the feet, though, is body volume that
+ * terrain has no business occupying.
+ *
+ * The columns are inset one pixel at each end, matching `testCollisionX` and
+ * `testCollisionY` — every probe in this module reads the same body, and a
+ * column that one of them counts and another does not is a pixel where the
+ * body is stuck and standing at the same time.
+ */
+export function isEmbedded(
+  mask: Uint8Array,
+  mapWidth: number,
+  mapHeight: number,
+  body: Body
+): boolean {
+  const top = Math.floor(body.y - PLAYER_HEIGHT);
+  const bottom = Math.floor(body.y) - 1;
+  const left = Math.floor(body.x - HALF_WIDTH) + 1;
+  const right = Math.floor(body.x + HALF_WIDTH) - 1;
+  for (let y = top; y <= bottom; y++) {
+    for (let x = left; x <= right; x++) {
+      if (isSolid(mask, mapWidth, mapHeight, x, y)) return true;
+    }
+  }
+  return false;
+}
+
+/**
  * Resolve a body embedded in terrain — possible when a `rect` op is drawn over
  * it, or when a map loads with a body inside a hill.
  *
- * Probes 1px to each side and ejects toward whichever side is free. If BOTH
- * sides are blocked, or NEITHER is, the body is either genuinely wedged or
- * already fine: bail out rather than teleport it. Iterations are bounded so a
- * pathological mask cannot hang the simulation.
+ * The guard is `isEmbedded`, NOT "is grounded". Using groundedness here is what
+ * made every hill on every map unwalkable: an AABB standing on a slope always
+ * has its uphill flank inside the terrain, so the old loop found one side
+ * blocked and one side free on ANY incline and shoved the body one pixel
+ * downhill. Since the physics loop ejects once per frame and walking advances
+ * one pixel per frame, the shove exactly cancelled the step — characters walked
+ * in place, burning their whole Movement Budget, on gradients as gentle as 5
+ * degrees. The climb limit was never the problem: `walkStep` on its own cleared
+ * every gradient it was handed.
+ *
+ * Order matters once the guard is right. A body that is merely sunk into a
+ * hillside is freed by LIFTING it onto the surface — the same remedy `walkStep`
+ * applies mid-climb, and the one that preserves where the player put
+ * themselves. Only a body that no lift within `CLIMB_LIMIT` can free is
+ * genuinely buried, and only then is it worth moving sideways: probe 1px each
+ * way and eject toward whichever side is free. If BOTH sides are blocked, or
+ * NEITHER is, the body is either truly wedged or already fine, so bail rather
+ * than teleport it. Iterations are bounded so a pathological mask cannot hang
+ * the simulation.
  */
 export function pushOutOfWall(
   mask: Uint8Array,
@@ -131,9 +179,34 @@ export function pushOutOfWall(
   mapHeight: number,
   body: Body
 ): void {
+  if (!isEmbedded(mask, mapWidth, mapHeight, body)) return;
+
+  // Lift out, if the room is there. Bounded by the same climb budget walking
+  // uses, so what a character can be lifted out of and what it can walk up are
+  // one number.
+  const originalY = body.y;
+  for (let lift = 1; lift <= CLIMB_LIMIT; lift++) {
+    body.y -= 1;
+    if (!isEmbedded(mask, mapWidth, mapHeight, body)) {
+      // Lift to the first free pixel and the body is left hovering there, which
+      // the integrator reads as airborne and drops back into the terrain it was
+      // just lifted out of. Put it down on the surface instead.
+      const lifted = body.y;
+      settle(mask, mapWidth, mapHeight, body);
+
+      // Unless settling would bury it again. Hovering for a frame is a
+      // cosmetic flaw; a settle that re-embeds is lifted out and dropped back
+      // in on every frame for as long as the body stands there.
+      if (isEmbedded(mask, mapWidth, mapHeight, body)) body.y = lifted;
+      return;
+    }
+  }
+  body.y = originalY;
+
+  // Buried. Sideways is all that is left.
   let iterations = 0;
   while (
-    testCollisionY(mask, mapWidth, mapHeight, body, 1) &&
+    isEmbedded(mask, mapWidth, mapHeight, body) &&
     iterations < MAX_PUSH_ITERATIONS
   ) {
     const leftBlocked = testCollisionX(mask, mapWidth, mapHeight, body, -1);
@@ -160,12 +233,19 @@ export function footGroundHeight(
   body: Body
 ): number | null {
   const startY = Math.floor(body.y);
-  const spacing = FOOT_SAMPLES > 1 ? PLAYER_WIDTH / (FOOT_SAMPLES - 1) : 0;
+  // Inset 1px at each end, exactly as `testCollisionY` does. These two must
+  // agree: this one decides where the body RESTS and that one decides whether
+  // it is standing, so a column counted by one and not the other leaves a
+  // 1px band where a body is simultaneously settled and falling. On a slope
+  // that band is where the body lives, and it alternated grounded/airborne
+  // every frame — halving walk speed and jittering the sprite.
+  const span = PLAYER_WIDTH - 2;
+  const spacing = FOOT_SAMPLES > 1 ? span / (FOOT_SAMPLES - 1) : 0;
   let best: number | null = null;
 
   for (let i = 0; i < FOOT_SAMPLES; i++) {
     const sampleX =
-      FOOT_SAMPLES > 1 ? body.x - HALF_WIDTH + i * spacing : body.x;
+      FOOT_SAMPLES > 1 ? body.x - HALF_WIDTH + 1 + i * spacing : body.x;
     for (let dy = 0; dy <= STEP_LIMIT; dy++) {
       const y = startY + dy;
       if (isSolid(mask, mapWidth, mapHeight, sampleX, y)) {
@@ -210,6 +290,78 @@ function ceilingBlocked(
 }
 
 /**
+ * The surface height in a single column, searching `window` pixels either side
+ * of `y`, or `null` if the column has no surface in that band.
+ */
+function surfaceNear(
+  mask: Uint8Array,
+  mapWidth: number,
+  mapHeight: number,
+  x: number,
+  y: number,
+  window: number
+): number | null {
+  for (let h = 0; h <= window; h++) {
+    if (isSolid(mask, mapWidth, mapHeight, x, y - h)) {
+      // Walk back up to the first empty pixel: the TOP of the run, not a pixel
+      // buried inside it.
+      let top = y - h;
+      while (top > 0 && isSolid(mask, mapWidth, mapHeight, x, top - 1)) top--;
+      return top;
+    }
+    if (h > 0 && isSolid(mask, mapWidth, mapHeight, x, y + h)) return y + h;
+  }
+  return null;
+}
+
+/**
+ * Is the ground ahead too steep a SLOPE to walk up?
+ *
+ * Measured as a secant AHEAD of the body: the feet against the surface one body
+ * width past the leading edge. That run length is the whole trick, because it
+ * is what tells a slope apart from a step. A ledge has a fixed rise however far
+ * you measure, so a 45px lip read across 24px is well inside the limit and
+ * stays climbable; an incline's rise grows with the run, so an 80 degree face
+ * reads as 80 degrees and is refused. A per-step lift budget cannot make that
+ * distinction at any value — it is one number answering two questions — which
+ * is how characters came to stroll up sheer cliffs while a 5 degree hill
+ * stopped them dead.
+ *
+ * Deliberately one-sided. An earlier straddling secant sampled behind the body
+ * too, and a trailing sample sitting over a plateau edge or an overhang reads
+ * as a vertical drop, which would refuse to let a character walk INLAND away
+ * from a ledge. What is behind the body is terrain it has already crossed.
+ *
+ * The search band is sized to the limit itself, so nothing needs an unbounded
+ * scan: a wall ahead is found by its top and refused on the rise, while ground
+ * that falls away past the band is a descent and no business of this test.
+ */
+export function tooSteepToClimb(
+  mask: Uint8Array,
+  mapWidth: number,
+  mapHeight: number,
+  body: Body,
+  dir: number
+): boolean {
+  const step = Math.sign(dir) || 1;
+  const maxRise = PLAYER_WIDTH * MAX_CLIMB_GRADIENT;
+  const window = Math.ceil(maxRise) + 2;
+  const y = Math.floor(body.y);
+
+  // The feet already sit on the surface under the LEADING edge — that is what
+  // `footGroundHeight` picks — so the near end of the secant is the body
+  // itself, and the far end is one body width beyond that edge.
+  const farX = Math.floor(body.x + step * (HALF_WIDTH + PLAYER_WIDTH));
+  const far = surfaceNear(mask, mapWidth, mapHeight, farX, y, window);
+
+  // Nothing solid within the band: the ground falls away ahead. A descent, or
+  // thin air. Either way it is not a climb.
+  if (far === null) return false;
+
+  return y - far > maxRise;
+}
+
+/**
  * Advance the body EXACTLY ONE PIXEL horizontally, climbing within
  * `CLIMB_LIMIT` and descending within `STEP_LIMIT`. Mutates `body` in place.
  *
@@ -231,6 +383,9 @@ export function walkStep(
   dir: number
 ): WalkResult {
   const step = Math.sign(dir) || 1;
+
+  // Refuse the slope before touching the body, so there is nothing to undo.
+  if (tooSteepToClimb(mask, mapWidth, mapHeight, body, step)) return 'blocked';
 
   let climbed = 0;
   while (

@@ -8,6 +8,7 @@ import {
   ProjectileView,
   TerrainOp,
 } from '@browserbond/shared';
+import { ShotClock } from './rendering/ShotClock';
 
 /**
  * Copy the fields the client is allowed to read off a synchronized Player.
@@ -41,6 +42,23 @@ export class GameState {
   public projectiles: Map<string, ProjectileView> = new Map();
   public collision: { type: string; x: number; y: number; time: number } | null = null;
   public onTerrainOp: ((op: TerrainOp) => void) | null = null;
+
+  /**
+   * Everything a shot does on arrival waits here.
+   *
+   * A projectile's position is drawn `SHOT_DELAY_MS` behind live so it can be
+   * interpolated between patches; its impact, its crater and its removal from
+   * the world all arrive as news that is true the instant it lands. Releasing
+   * that news immediately put it a delay's worth of flight AHEAD of the
+   * projectile the player was watching, which is what made shots explode in
+   * mid-air short of the ground.
+   *
+   * Presentation timing in the state layer is deliberate: this is where a
+   * shot's news lands, and the whole point is that one owner decides when ALL
+   * of it becomes visible. Split that decision across the renderer and here and
+   * the two clocks grow apart again.
+   */
+  private shotClock = new ShotClock();
 
   /**
    * Called with the map the room is playing before any of its terrain ops.
@@ -199,8 +217,12 @@ export class GameState {
 
     track(
       $(this.room.state).projectiles.onRemove((_proj: Projectile, key: string) => {
-        this.projectiles.delete(key);
+        // Stop taking new positions for it straight away — there are none —
+        // but let it finish flying the stretch already in the buffer before it
+        // vanishes, so it disappears into its own explosion rather than a
+        // delay short of it.
         this.releaseEntity(key);
+        this.shotClock.defer(performance.now(), () => this.projectiles.delete(key));
       })
     );
 
@@ -229,6 +251,26 @@ export class GameState {
     this.stateUnsubscribers = [];
     for (const off of this.entityUnsubscribers.values()) off();
     this.entityUnsubscribers.clear();
+
+    // A held-back crater belongs to a room that is gone. Drop it rather than
+    // painting it over whatever comes next.
+    this.shotClock.clear();
+
+    // Dropping the queue drops the removals waiting in it, so anything those
+    // were going to delete would be stranded on screen forever — a red dot
+    // hanging in the sky from a shot that landed before a reconnect. Clearing
+    // both maps costs nothing, because rebinding re-fires `onAdd` for
+    // everything the room still holds and repopulates them from state.
+    this.projectiles.clear();
+    this.players.clear();
+  }
+
+  /**
+   * Advance the shot clock, releasing anything a shot did that the drawn moment
+   * has now caught up to. Called once per rendered frame.
+   */
+  advanceShotClock(now: number): void {
+    this.shotClock.flush(now);
   }
 
   /**
@@ -271,12 +313,34 @@ export class GameState {
     if (!this.room) return;
 
     this.room.onMessage('collision', (data) => {
-      this.collision = {
-        type: data.type,
-        x: data.x,
-        y: data.y,
-        time: Date.now(),
-      };
+      // Fly the projectile the rest of the way in, NOW rather than on release.
+      //
+      // Positions arrive at the patch rate but the shot resolves on a
+      // simulation frame, so the last position the client is ever told about
+      // can be most of a patch short of where the shot actually landed — and
+      // the projectile is deleted in the same patch, so no later position is
+      // coming. Left alone the drawn projectile stops in mid-air a few frames
+      // shy of the ground, which is most of what "it explodes nowhere near the
+      // projectile" was.
+      //
+      // This message carries the exact impact point, so feed it in as the
+      // track's final position and let the interpolation carry the projectile
+      // into it over the delay that is about to elapse. By the time the
+      // explosion is released below, the projectile has arrived.
+      if (data.projectileId && this.projectiles.has(data.projectileId)) {
+        this.projectiles.set(data.projectileId, { x: data.x, y: data.y });
+      }
+
+      this.shotClock.defer(performance.now(), () => {
+        this.collision = {
+          type: data.type,
+          x: data.x,
+          y: data.y,
+          // Stamped on RELEASE, not on arrival: the explosion animation runs
+          // off this, and a timestamp from a delay ago starts it part-played.
+          time: Date.now(),
+        };
+      });
 
       // No hit callback. It had no subscriber, and it read `data.health` —
       // a field this broadcast has never carried, so it always passed
@@ -289,14 +353,15 @@ export class GameState {
     });
 
     this.room.onMessage('playerDied', (data: { playerId: string; x: number; y: number }) => {
-      // Drop the player locally right away instead of waiting for the schema
-      // removal to arrive — the sprite must disappear on the same frame the
-      // explosion starts.
-      this.players.delete(data.playerId);
-
-      if (this.onPlayerDied) {
-        this.onPlayerDied(data.playerId, data.x, data.y);
-      }
+      // A death is part of the impact that caused it, so it waits with the
+      // rest of the shot. Held back together, and released together: the sprite
+      // must disappear on the same frame its explosion starts, which is the
+      // reason this drops the player locally rather than waiting for the schema
+      // removal to arrive on its own.
+      this.shotClock.defer(performance.now(), () => {
+        this.players.delete(data.playerId);
+        this.onPlayerDied?.(data.playerId, data.x, data.y);
+      });
     });
 
     this.room.onMessage('terrainSync', (data: { mapId?: string; ops: TerrainOp[] }) => {
@@ -319,11 +384,17 @@ export class GameState {
     });
 
     this.room.onMessage('terrainOp', (op: TerrainOp) => {
-      if (this.onTerrainOp) {
-        this.onTerrainOp(op);
-      } else {
-        this.pendingTerrainOps.push(op);
-      }
+      // A crater is part of the impact that made it, so it waits with the
+      // explosion. `terrainSync` above does NOT wait: that is the backlog of a
+      // match already in progress, history rather than news, and holding it
+      // back would only draw the map wrong for a moment on join.
+      this.shotClock.defer(performance.now(), () => {
+        if (this.onTerrainOp) {
+          this.onTerrainOp(op);
+        } else {
+          this.pendingTerrainOps.push(op);
+        }
+      });
     });
 
     // A Blocked Move: the character is against terrain it cannot climb, which
