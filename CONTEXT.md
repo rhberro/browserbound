@@ -88,6 +88,8 @@ This separation enables:
 - **WIND_INTEGRATION**: Scaling factor for how strongly wind affects projectiles
 - **MAP_WIDTH, MAP_HEIGHT**: World bounds (pixels)
 - **WIND_DURATION_MIN, WIND_DURATION_MAX**: Rounds (5–10)
+- **RECONNECT_WINDOW_SECONDS**: How long a dropped player keeps their character and turn
+- **PROJECTILE_MAX_LIFETIME_FRAMES**: Backstop after which an unresolved projectile is retired
 
 ## Why This Design
 
@@ -176,6 +178,34 @@ and the real-world direction moves with the chassis.
 
 Aim is confined to a fixed range relative to the chassis. Terrain that tilts a character far enough
 can press its aim against that limit, denying shots that would be available on level ground.
+
+### Reconnection Window
+
+A dropped connection is not a departure. A character whose player has disconnected stays on the
+field for the **Reconnection Window**, keeping its health, its position, its turn and its unspent
+Movement Budget, and rejoining restores all of it because none of it was ever torn down. The turn
+clock is *frozen* for the duration rather than extended, so a player who returns gets back the time
+they had left and no more.
+
+A **deliberate leave is not a drop** and does not wait out the window — the opponent should not sit
+through a timer for someone who has already gone. Only expiry of the window removes the character
+and passes the turn.
+
+While the window is open the character is marked as disconnected to everyone else, because a
+character standing still because its player is thinking and one standing still because its player
+fell off the network are otherwise indistinguishable.
+
+### Projectile Lifetime
+
+A projectile that has neither collided nor left the world after a bounded number of frames is
+retired, and the turn proceeds. This is a **backstop, not a game rule**: nothing legitimate reaches
+it, since a full-power shot crosses the map in well under a second.
+
+It exists because the turn only passes once no projectile is in flight, which makes a single
+projectile that can never resolve a permanent freeze for *every* player in the room. Retirement is
+deliberately not an impact — it destroys no terrain and damages nobody, and it reports no position,
+because the position of a projectile that failed to resolve is precisely the value that cannot be
+trusted.
 
 ### Kill Boundary
 

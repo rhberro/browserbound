@@ -271,6 +271,13 @@ export class GameState {
       }
     });
 
+    // A projectile the server gave up on: remove it silently. Deliberately no
+    // explosion — there is no trustworthy position to draw one at, which is
+    // the whole reason the server sends no coordinates.
+    this.room.onMessage('projectileExpired', (data: { projectileId: string }) => {
+      this.projectiles.delete(data.projectileId);
+    });
+
     this.room.onMessage('playerDied', (data: { playerId: string; x: number; y: number }) => {
       // Drop the player locally right away instead of waiting for the schema
       // removal to arrive — the sprite must disappear on the same frame the

@@ -4,7 +4,7 @@ import { InputAdapter } from '../adapters/InputAdapter';
 import { CameraAdapter } from '../adapters/CameraAdapter';
 import { RendererAdapter } from '../adapters/RendererAdapter';
 import { mountHud } from '../ui/mountHud';
-import { syncHudSignals } from '../ui/signals';
+import { syncHudSignals, isConnected } from '../ui/signals';
 
 export class GameScene {
   private app: PIXI.Application;
@@ -37,6 +37,13 @@ export class GameScene {
       void this.rendererAdapter.loadMap(mapId);
     });
     this.gameState.setOnTerrainOp((op) => this.rendererAdapter.applyTerrainOp(op));
+
+    // Our own connection state drives the banner. Without this the dropped
+    // player sees a game that has simply stopped, with no way to tell a retry
+    // in progress from a hang.
+    this.gameState.onConnectionChange = (connected) => {
+      isConnected.value = connected;
+    };
 
     // Blow up players the moment the server reports them dead
     this.gameState.onPlayerDied = (_playerId, x, y) => {

@@ -21,6 +21,15 @@ export const isMyTurn = signal(false);
 export const windSpeed = signal(0);
 export const windDirection = signal(0);
 
+/**
+ * False while our OWN connection is dropped and being retried.
+ *
+ * The opponent's disconnect shows on their sprite; this is the other half —
+ * the dropped player needs to know the game has not frozen and that a rejoin
+ * is in progress, because from inside a drop the two look identical.
+ */
+export const isConnected = signal(true);
+
 export const lastAngle = signal(readLastShotValue('angle', 0));
 export const lastPower = signal(readLastShotValue('power', 0));
 

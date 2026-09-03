@@ -35,7 +35,7 @@ describe('clampAimDeg', () => {
     }
   });
 
-  it('resolves a non-finite angle to the middle of the range rather than NaN', () => {
+  it('resolves a non-finite angle to the horizontal rather than NaN', () => {
     expect(clampAimDeg(NaN)).toBe(0);
     expect(clampAimDeg(Infinity)).toBe(0);
     expect(clampAimDeg(undefined as never)).toBe(0);

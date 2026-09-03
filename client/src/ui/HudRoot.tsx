@@ -1,4 +1,5 @@
 import { StatusPill } from './components/StatusPill';
+import { ConnectionBanner } from './components/ConnectionBanner';
 import { AngleControl } from './components/AngleControl';
 import { PowerBar } from './components/PowerBar';
 import { WeaponSelector } from './components/WeaponSelector';
@@ -16,7 +17,10 @@ import { deckStateClass } from './signals';
 export function HudRoot() {
   return (
     <div class="flex h-full flex-col justify-between">
-      <StatusPill />
+      <div>
+        <StatusPill />
+        <ConnectionBanner />
+      </div>
 
       <div class="pointer-events-none flex justify-center px-4 pb-6">
         <div class={deckStateClass}>

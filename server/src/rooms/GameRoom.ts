@@ -311,13 +311,13 @@ export class GameRoom extends Room<RoomState> {
         console.warn(
           `[Projectile] ${proj.id} expired after ${PROJECTILE_MAX_LIFETIME_FRAMES} frames at (${proj.x}, ${proj.y})`
         );
-        this.broadcast('collision', {
-          type: 'miss',
-          projectileId: proj.id,
-          x: proj.x,
-          y: proj.y,
-          affectedPlayers: [],
-        });
+        // NOT a collision. A collision carries a position, and the position of
+        // an expired projectile is exactly the thing that cannot be trusted —
+        // in the NaN case that reaches this path, broadcasting it would have
+        // the client render an explosion at NaN. This message carries no
+        // coordinates at all: it says only "this projectile is gone", so the
+        // client drops the graphic without drawing anything.
+        this.broadcast('projectileExpired', { projectileId: proj.id });
         projectilesToRemove.push(proj.id);
         continue;
       }

@@ -16,17 +16,17 @@ export function degToRad(deg: number): number {
   return (deg * Math.PI) / 180;
 }
 
-export function radToDeg(rad: number): number {
-  return (rad * 180) / Math.PI;
-}
-
 /**
  * Confine a chassis-relative aim angle, in degrees, to the permitted range.
  *
  * Out-of-range aim is CLAMPED, never rejected: ADR 0003 rules out a fire button
- * that silently does nothing, so the barrel stops moving instead. A non-finite
- * angle resolves to the middle of the range rather than propagating NaN, which
- * `Math.max`/`Math.min` would otherwise pass straight through.
+ * that silently does nothing, so the barrel stops moving instead.
+ *
+ * A non-finite angle resolves to zero — the horizontal — rather than
+ * propagating NaN, which `Math.max`/`Math.min` would otherwise pass straight
+ * through. Zero, not the arithmetic midpoint of the range: the point is to land
+ * somewhere a player can recognise and correct from, and level is the only
+ * angle in the range that means something on its own.
  */
 export function clampAimDeg(deg: number): number {
   if (!Number.isFinite(deg)) return 0;
