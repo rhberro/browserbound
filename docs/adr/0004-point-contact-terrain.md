@@ -77,11 +77,26 @@ this deletion rather than separately, because both were artifacts of machinery t
 exists.
 
 **Knockback is our one deliberate divergence.** GunBound has no lateral velocity in the air at all;
-only wind pushes a falling mobile, as a sub-pixel accumulator clamped to ±1 and spent a whole pixel
-at a time. We keep knockback, because it is tuned into every weapon's `knockbackScale` and is a
-real part of how our weapons read, but a knocked-back character that meets a wall **stops** against
-it rather than reflecting. Setting every `knockbackScale` to 0 would reduce us to exact GunBound
-behaviour without touching physics code.
+only wind pushes a falling mobile, as a sub-pixel accumulator spent a whole pixel at a time. We
+keep knockback, because it is tuned into every weapon's `knockbackScale` and is a real part of how
+our weapons read.
+
+It is a **positional shove**, not stored velocity, and horizontal only. Vertical is easy: nothing
+moves a character upward, so an upward impulse would be discarded by the next tick's fall, and
+taking only the horizontal component says that plainly. Positional is the less obvious half — a
+grounded character has no way to *spend* velocity, because the integrator only moves `vx` on the
+airborne path, so an impulse handed to someone still standing sits unspent until something else
+knocks them loose and then fires late. That is the common case rather than the edge one: splash
+reaches further than the crater does, so most targets take damage while keeping their footing.
+
+So a shove walks, using the same `walkStep` a player's own movement does. It follows slopes, stops
+dead against a wall, and pushes a character clean off a ledge into a fall, with no special case for
+any of them. A character already in the air has nothing to walk on, so there it stays velocity and
+the airborne path spends it — sharing one sub-pixel accumulator with the wind, because truncating
+each force separately loses its remainder every tick and drops a small shove entirely.
+
+Setting every `knockbackScale` to 0 would reduce us to exact GunBound behaviour without touching
+physics code.
 
 **Positions shift slightly on slopes.** A character now follows the surface of its own column
 exactly, rather than riding the highest ground under a 24px foot line. `player.y` keeps its meaning

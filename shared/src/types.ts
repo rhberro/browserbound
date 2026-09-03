@@ -69,9 +69,6 @@ export const STEP_UP_LIMIT = 6;
  */
 export const STEP_DOWN_LIMIT = 6;
 
-/** Pixels advanced per walk step. Integer on purpose — see WALK_WINDUP_MS. */
-export const WALK_STEP_PX = 1;
-
 /**
  * Hesitation before a held direction produces its FIRST step, in ms.
  *
@@ -84,8 +81,10 @@ export const WALK_STEP_PX = 1;
 export const WALK_WINDUP_MS = 100;
 
 /**
- * Steps a character may take per turn, replenished each turn. The unit is
- * STEPS, and a step is `WALK_STEP_PX`, so at the default it is also pixels.
+ * Steps a character may take per turn, replenished each turn. A step is one
+ * pixel by definition — terrain is followed per pixel, so a longer stride would
+ * step over the column it reads its surface from — which makes this a distance
+ * as well as a count.
  *
  * GunBound gives each mobile 90-100. Ours was 250px at double the pace, which
  * is a large part of why walking read as slidey rather than deliberate. TUNE.
@@ -104,11 +103,19 @@ export const FALL_INITIAL_SPEED = 3;
 export const FALL_ACCEL = 0.15;
 
 /**
- * Divides the wind acceleration into a per-tick drift for a FALLING character.
- * The accumulator is clamped to +/-1 and applied as whole pixels, so weak wind
- * nudges a long fall by a pixel now and then rather than sliding it. TUNE.
+ * Scales the wind acceleration into a per-tick sideways drift for a FALLING
+ * character. The accumulator is clamped to +/-1 and spent as whole pixels, so
+ * weak wind nudges a long fall by a pixel now and then rather than sliding it.
+ *
+ * Sized against a fall, not copied from GunBound: OpenBound divides its wind
+ * force by 45, but its force is in different units than ours, and porting the
+ * divisor made the drift unreachable — at our maximum wind acceleration
+ * (WIND_INTEGRATION * 0.5 = 0.175/tick) it needed ~4s of continuous falling to
+ * emit a single pixel, and the longest fall on the map is about 2s. At 0.5 the
+ * strongest wind moves a falling character a pixel every ~11 ticks, so a long
+ * drop lands roughly 10px downwind and a short one is untouched. TUNE.
  */
-export const WIND_DRIFT_DIVISOR = 45;
+export const WIND_DRIFT_SCALE = 0.5;
 
 /**
  * Bound on the lift that frees a contact point with terrain drawn over it (a
@@ -152,12 +159,20 @@ export const RECONNECT_WINDOW_SECONDS = 30;
  */
 export const PROJECTILE_MAX_LIFETIME_FRAMES = 625;
 
+/**
+ * How far a blast pushes a character, in pixels per point of `knockbackScale`
+ * times damage. A one-time positional shove along the ground rather than stored
+ * velocity: a grounded character has no way to spend velocity, and a shove that
+ * walks the terrain follows slopes and stops at walls for free. TUNE.
+ */
+export const KNOCKBACK_SHOVE_SCALE = 1;
+
 /** Half the track length used for the chassis tilt secant. */
 export const TILT_OFFSET_X = 12;
 /**
- * Vertical search window for the tilt secant. Deliberately double STEP_LIMIT:
- * tilt and locomotion use different budgets, so a character tilts smoothly
- * across terrain it could never walk over.
+ * Vertical search window for the tilt secant. Deliberately far larger than
+ * STEP_UP_LIMIT: tilt and locomotion answer different questions, so a character
+ * tilts smoothly across terrain it could never walk over.
  */
 export const TILT_WINDOW_Y = 25;
 

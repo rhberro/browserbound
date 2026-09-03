@@ -30,7 +30,6 @@ import {
   PLAYER_HEIGHT,
   STEP_UP_LIMIT,
   STEP_DOWN_LIMIT,
-  WALK_STEP_PX,
   EJECT_UP_LIMIT,
   TILT_OFFSET_X,
   TILT_WINDOW_Y,
@@ -97,6 +96,18 @@ export function isSolid(
  * at the limit itself, which quietly makes its advertised 6px step a 5px one;
  * starting a row higher costs a pixel of fidelity and buys a constant that
  * means what it says.
+ *
+ * Scanning top-down means the HIGHEST surface in the window wins, so a shelf a
+ * few pixels above the floor is stepped onto rather than walked under. That is
+ * deliberate and is what "step up" means — a gap shorter than the step window
+ * is not space a character could use anyway — and it is what GunBound does.
+ * Only a roof high enough to stand under is walked beneath, which is the case
+ * the old lookahead secant got wrong.
+ *
+ * A column outside the map is a WALL, not a cliff. The mask reads
+ * out-of-bounds as empty, so without this the map edge is a ledge: a character
+ * walks off it, falls past the Kill Boundary and dies on its own turn, having
+ * paid a step for the privilege.
  */
 export function surfaceAhead(
   mask: Uint8Array,
@@ -107,6 +118,8 @@ export function surfaceAhead(
   dir: number
 ): SurfaceProbe {
   const col = Math.floor(x) + (Math.sign(dir) || 1);
+  if (col < 0 || col >= mapWidth) return { kind: 'wall' };
+
   const top = Math.floor(y) - STEP_UP_LIMIT - 1;
   const bottom = Math.floor(y) + STEP_DOWN_LIMIT;
 
@@ -204,7 +217,10 @@ export function walkStep(
   body: Body,
   dir: number
 ): WalkResult {
-  const step = (Math.sign(dir) || 1) * WALK_STEP_PX;
+  // Exactly one pixel, and not a tunable. `surfaceAhead` reads a single column,
+  // so a longer stride would land the body somewhere other than the column its
+  // new surface came from — and step through anything narrower than the stride.
+  const step = Math.sign(dir) || 1;
   const probe = surfaceAhead(mask, mapWidth, mapHeight, body.x, body.y, dir);
 
   if (probe.kind === 'wall') return 'blocked';

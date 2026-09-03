@@ -2,7 +2,7 @@ import { Room, Client } from 'colyseus';
 import {
   GRAVITY, WIND_INTEGRATION, TerrainOp, MAP_WIDTH, MAP_HEIGHT,
   DEFAULT_CRATER_RADIUS, applyOpToBitmap, collapseLips, appendOp, PLAYER_HEIGHT,
-  MOVE_STEPS, TURN_TIME_MS, TERMINAL_VELOCITY, WIND_DRIFT_DIVISOR,
+  MOVE_STEPS, TURN_TIME_MS, TERMINAL_VELOCITY, WIND_DRIFT_SCALE, KNOCKBACK_SHOVE_SCALE,
   PROJECTILE_MAX_LIFETIME_FRAMES, RECONNECT_WINDOW_SECONDS,
   walkStep, isSolid, isGrounded, groundDistance, ejectUp, computeTilt, Body,
   pointInBody,
@@ -521,22 +521,15 @@ export class GameRoom extends Room {
           player.health = Math.max(0, player.health - dmg);
 
           // Apply knockback
+          // HORIZONTAL ONLY, deliberately. Since ADR 0004 a character has no
+          // upward motion at all — gravity moves it down toward the surface and
+          // nothing moves it up — so an upward `iy` would be discarded by the
+          // next tick's fall. Taking only `ix` says that plainly instead of
+          // storing an impulse nothing will ever spend. This matches GunBound,
+          // where a blast shoves a mobile sideways and it falls; mobiles are
+          // never launched.
           const kb = knockbackImpulse(dx, dy, dmg, weapon.knockbackScale);
-          if (kb.ix !== 0) {
-            // HORIZONTAL ONLY, deliberately. Since ADR 0004 a character has no
-            // upward motion at all — gravity moves it down toward the surface
-            // and nothing moves it up — so an upward `iy` would be silently
-            // discarded by the next tick's fall. Taking only `ix` says that
-            // plainly instead of storing an impulse nothing will ever spend.
-            // This matches GunBound, where a blast shoves a mobile sideways and
-            // it falls; mobiles are never launched.
-            player.vx += kb.ix;
-            player.airborne = true;
-            // A fresh blast restarts the hang, so a character shot off a ledge
-            // gets the same beat before dropping as one whose ground vanished.
-            this.fallDelay.delete(playerId);
-            this.windDrift.delete(playerId);
-          }
+          if (kb.ix !== 0) this.shove(playerId, player, kb.ix);
 
           if (player.health <= 0) {
             killed.push(playerId);
@@ -672,6 +665,11 @@ export class GameRoom extends Room {
         player.airborne = false;
         this.fallDelay.delete(playerId);
         this.windDrift.delete(playerId);
+        // A blocked run does not survive a fall: a character that walked into a
+        // wall, was blasted loose and landed against another one must be told
+        // again. Cleared here rather than only on the walking path below, which
+        // a falling character never reaches.
+        this.blockedNotified.delete(playerId);
 
         const input = this.playerInputs.get(playerId);
         const isCurrent = playerId === this.state.currentPlayerId;
@@ -762,26 +760,21 @@ export class GameRoom extends Room {
     // "what is the wind doing".
     const windAx = wind.magnitude * Math.cos(wind.angle) * WIND_INTEGRATION;
 
-    const drift = Math.max(
-      -1,
-      Math.min(1, (this.windDrift.get(playerId) ?? 0) + windAx / WIND_DRIFT_DIVISOR)
-    );
-
-    // Knockback is real velocity; wind is a sub-pixel accumulator that spends
-    // itself a whole pixel at a time.
     const vx = Math.max(-TERMINAL_VELOCITY, Math.min(player.vx, TERMINAL_VELOCITY));
     player.vx = vx;
-    const pixels = Math.trunc(vx) + Math.trunc(drift);
 
-    // Whatever the accumulator did not spend is carried; the knockback pixels
-    // are spent from real velocity and are not.
-    this.windDrift.set(playerId, drift - Math.trunc(drift));
+    // ONE accumulator for both forces. Truncating each independently loses its
+    // remainder every tick, which under-delivers a knockback by up to a pixel
+    // per tick and drops a sub-pixel one entirely.
+    const carried = (this.windDrift.get(playerId) ?? 0) + vx + windAx * WIND_DRIFT_SCALE;
+    const pixels = Math.trunc(carried);
+    this.windDrift.set(playerId, carried - pixels);
 
     const step = Math.sign(pixels);
     for (let i = 0; i < Math.abs(pixels); i++) {
       if (isSolid(this.terrainBitmap, MAP_WIDTH, MAP_HEIGHT, body.x + step, body.y)) {
         // Stop against the wall. Both forces die here: reflecting the velocity
-        // is the bounce, and carrying the drift would grind the character
+        // is the bounce, and carrying the remainder would grind the character
         // along the face for the rest of the fall.
         player.vx = 0;
         this.windDrift.set(playerId, 0);
@@ -789,6 +782,51 @@ export class GameRoom extends Room {
       }
       body.x += step;
     }
+  }
+
+  /**
+   * Push a character sideways along the ground, away from a blast.
+   *
+   * A POSITIONAL shove, not stored velocity. A grounded character has no way to
+   * spend velocity — the integrator only moves `vx` on the airborne path — so an
+   * impulse handed to someone still standing sat unspent until something else
+   * knocked them loose, and then fired late. That is the common case rather than
+   * the edge one: splash reaches further than the crater does, so most targets
+   * take damage while keeping their footing.
+   *
+   * Walking the shove with `walkStep` is what makes it read as a shove: it
+   * follows slopes, stops dead against a wall, and pushes a character clean off
+   * a ledge into a fall, all without a single special case. A character already
+   * in the air has nothing to walk on, so there it stays velocity and the
+   * airborne path spends it.
+   */
+  private shove(playerId: string, player: Player, ix: number) {
+    const body: Body = { x: player.x, y: player.y };
+
+    if (!isGrounded(this.terrainBitmap, MAP_WIDTH, MAP_HEIGHT, body)) {
+      player.vx += ix;
+      return;
+    }
+
+    const dir = Math.sign(ix);
+    const pixels = Math.round(Math.abs(ix) * KNOCKBACK_SHOVE_SCALE);
+
+    for (let i = 0; i < pixels; i++) {
+      const result = walkStep(this.terrainBitmap, MAP_WIDTH, MAP_HEIGHT, body, dir);
+      if (result === 'blocked') break;
+      if (result === 'fell') {
+        // Off the edge. The rest of the shove is the fall's business.
+        player.airborne = true;
+        break;
+      }
+    }
+
+    player.x = body.x;
+    player.y = body.y;
+    // A fresh blast restarts the hang, so a character shoved off a ledge gets
+    // the same beat before dropping as one whose ground vanished.
+    this.fallDelay.delete(playerId);
+    this.windDrift.delete(playerId);
   }
 
   /**

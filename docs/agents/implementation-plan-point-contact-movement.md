@@ -91,13 +91,14 @@ that changing the feel never means changing the algorithm.
 |---|---|---|---|
 | `STEP_UP_LIMIT` | 6 | `TankMovementMaxYStepping` | **TUNE**. Replaces `CLIMB_LIMIT`, `MAX_CLIMB_ANGLE_DEG`, `MAX_CLIMB_GRADIENT` |
 | `STEP_DOWN_LIMIT` | 6 | `TankMovementMinYStepping` | **TUNE**. Replaces `STEP_LIMIT` |
-| `WALK_STEP_PX` | 1 | `TankMovementSpeed` | integer, per sim tick |
+| (step size) | 1 px | `TankMovementSpeed` | not a constant: `surfaceAhead` reads one column, so a longer stride would step past it |
 | `WALK_WINDUP_MS` | 100 | `TankMovementSidewaysDelay` | **TUNE**. Hesitation before the first step |
-| `MOVE_STEPS` | 100 | `MaximumStepsPerTurn` (90–100) | **TUNE**. Replaces `MOVE_BUDGET = 250`. Unit is now **steps**, not pixels |
+| `MOVE_STEPS` | 100 | `MaximumStepsPerTurn` (90–100) | **TUNE**. Replaces `MOVE_BUDGET = 250`. Unit is now **steps** |
+| `KNOCKBACK_SHOVE_SCALE` | 1 | ours | **TUNE**. Pixels of shove per point of `knockbackScale * damage` |
 | `FALL_DELAY_MS` | 50 | `TankMovementGravityDelay` | **TUNE** |
 | `FALL_INITIAL_SPEED` | 3 | `TankMovementInitialGravity` | px/tick |
 | `FALL_ACCEL` | 0.15 | `TankMovementGravityFactor` | px/tick² |
-| `WIND_DRIFT_DIVISOR` | 45 | `windForceAccumulator + wForce.X / 45` | **TUNE**. Clamped ±1, applied as whole px |
+| `WIND_DRIFT_SCALE` | 0.5 | `windForceAccumulator + wForce.X / 45`, **re-derived** | **TUNE**. OpenBound's divisor is in its own force units; ported literally it made drift unreachable |
 | `EJECT_UP_LIMIT` | 32 | — | bound on the "terrain drawn over me" scan |
 | `TERMINAL_VELOCITY` | 12 | ours | kept as a safety clamp; GunBound has none |
 | `PLAYER_WIDTH` / `PLAYER_HEIGHT` | 24 / 36 | ours | **drawn body only** from here on |
@@ -251,13 +252,15 @@ Two forces want to move a falling character sideways, and they are not the same:
    there is one source of truth for what the wind is doing.
 
 2. **Knockback.** We have `knockbackImpulse`; OpenBound's client movement models nothing like it.
-   **Recommendation: keep it, but strip the bounce.** Carry `vx`, advance it as whole pixels
-   straight sideways at the current height, and on hitting a solid pixel set `vx = 0` — stop, do
-   not reflect, do not climb. Knockback stays a real weapon property (it is tuned into every
-   `knockbackScale` in `WeaponConfigAdapter`) while the ping-pong that reads as broken goes away.
+   **Kept, but stripped of the bounce and rebuilt as a positional shove.** As implemented (see
+   ADR 0004): horizontal only, and applied by walking the character with `walkStep` while it is
+   grounded rather than storing `vx` it has no way to spend. Only a character already airborne
+   carries it as velocity, sharing one sub-pixel accumulator with the wind. On hitting a solid
+   pixel both forces stop — no reflection, no climb.
 
-   The door left open: if lateral knockback still feels wrong, `knockbackScale` → 0 across the
-   weapon table reduces us to exact GunBound behaviour without touching physics code.
+   The door left open: `KNOCKBACK_SHOVE_SCALE` tunes how far a shove carries, and
+   `knockbackScale` → 0 across the weapon table reduces us to exact GunBound behaviour without
+   touching physics code.
 
 ### Acceptance
 

@@ -7,7 +7,6 @@ import {
   FALL_ACCEL,
   TERMINAL_VELOCITY,
   MOVE_STEPS,
-  WALK_STEP_PX,
 } from '@browserbond/shared';
 
 /** The server's fixed simulation tick. */
@@ -42,11 +41,11 @@ describe('walk wind-up', () => {
     expect(steps).toBe(TICKS - windupTicks + 1);
   });
 
-  it('walks close to 60px/s once wound up, in whole pixels', () => {
-    // Integer steps are the point: a fractional px/tick rate emits a
-    // 2,2,2,1 pattern that reads as jitter under 20Hz patching.
-    const pxPerSecond = (1000 / TICK) * WALK_STEP_PX;
-    expect(Number.isInteger(WALK_STEP_PX)).toBe(true);
+  it('walks close to 60px/s once wound up', () => {
+    // A step is exactly one pixel per tick, which is the point: a fractional
+    // px/tick rate emits a 2,2,2,1 pattern that reads as jitter under 20Hz
+    // patching. GunBound's pace is 60px/s at its 60fps tick.
+    const pxPerSecond = 1000 / TICK;
     expect(pxPerSecond).toBeGreaterThan(55);
     expect(pxPerSecond).toBeLessThan(70);
   });

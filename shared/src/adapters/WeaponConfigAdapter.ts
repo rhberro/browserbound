@@ -27,9 +27,12 @@ export interface WeaponSpec {
    * Radius (px) of the hole erased from the terrain mask by one projectile.
    *
    * Deliberately INDEPENDENT of splashRadius. Crater radius is constrained by the
-   * locomotion step-up rule (STEP_LIMIT = 12): a crater rim steeper than the step
-   * limit is unclimbable, so a big crater traps whoever is standing in it. That is
-   * a terrain-tuning knob. Damage is a balance knob. Coupling the two would mean
+   * Step Window (STEP_UP_LIMIT): a rim that rises faster than the step limit per
+   * pixel travelled is unclimbable, so a big crater traps whoever is standing in
+   * it. What saves these values at the current limit is that a circular rim is a
+   * SLOPE — it only approaches vertical at the very edge — plus `collapseLips`,
+   * which flattens the overhangs a crater digs into existing terrain. That is a
+   * terrain-tuning knob. Damage is a balance knob. Coupling the two would mean
    * every terrain fix silently rebalances the weapon, so they stay separate fields
    * even where they currently hold similar numbers.
    */
@@ -81,10 +84,11 @@ export const WEAPONS: Record<number, WeaponSpec> = {
     craterRadius: 50,
     splashRadius: 40,
     maxDamage: 50,
-    // 50 dmg * 0.35 = 17.5 px/tick SIDEWAYS (clamped to TERMINAL_VELOCITY 12) on a
-    // direct hit. Only the horizontal component is spent — since ADR 0004 nothing
-    // moves a character upward — so this shoves the target and drops it rather
-    // than launching it.
+    // 50 dmg * 0.35 = ~17px of SIDEWAYS shove on a direct hit. Only the
+    // horizontal component is spent — since ADR 0004 nothing moves a character
+    // upward — and it is spent as a walked displacement, so it follows slopes,
+    // stops against walls, and pushes the target off a ledge rather than
+    // launching it. TUNE via KNOCKBACK_SHOVE_SCALE.
     knockbackScale: 0.35,
   },
   2: {
@@ -110,12 +114,12 @@ export const WEAPONS: Record<number, WeaponSpec> = {
     // Splash 16 (zero at 36px) keeps each pellet tight: Burst is a precision
     // weapon, so it must not inherit Normal's forgiving 84px reach.
     // Crater 20 x3 overlapping digs roughly a Normal-sized hole, and each
-    // individual rim stays near STEP_LIMIT so a near miss does not wall someone in.
+    // individual rim stays shallow enough that a near miss does not wall someone in.
     craterRadius: 20,
     splashRadius: 16,
     maxDamage: 16,
     // Higher per-damage scale so a single 16-dmg projectile visibly shoves
-    // (16 * 0.40 = 6.4); three stacked hits total 12 px/frame (terminal velocity).
+    // (16 * 0.40 = 6.4, so ~6px); three stacked hits shove ~19px in total.
     knockbackScale: 0.40,
   },
   3: {

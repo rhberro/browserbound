@@ -240,9 +240,14 @@ Two different things move a falling character sideways.
 **Drift** is the wind, accumulated as a fraction of a pixel per moment and spent a whole pixel at a
 time. Weak wind nudges a long fall now and then rather than sliding it continuously.
 
-**Knockback** is velocity a blast imparted. A character carrying it moves sideways as it falls, and
-a character that meets a wall **stops** against it — it does not bounce off, and it does not climb
-it. Both forces die at the wall.
+**Knockback** is a blast shoving a character sideways. A character standing on the ground is
+shoved *along* it — following slopes, stopping against walls, and going over a ledge into a fall
+exactly as if it had walked there. A character already falling carries the shove as velocity
+instead, since there is nothing to walk on.
+
+Knockback is horizontal only: nothing in the game moves a character upward, so a blast shoves and
+drops rather than launching. A character that meets a wall **stops** against it — it does not
+bounce off, and it does not climb it. Both Drift and Knockback die at the wall.
 
 ### Movement Budget
 

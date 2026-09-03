@@ -191,6 +191,24 @@ describe('surfaceAhead', () => {
     expect(surfaceAhead(mask, W, H, 100, 100, 1)).toEqual({ kind: 'surface', y: 96 });
   });
 
+  it('treats a column outside the map as a wall, not a cliff', () => {
+    // The mask reads out-of-bounds as empty, so without an explicit guard the
+    // map edge is a ledge: a character walks off it, falls past the Kill
+    // Boundary and dies on its own turn having paid a step for it.
+    const mask = makeMask(flat(100));
+    expect(surfaceAhead(mask, W, H, 0, 100, -1)).toEqual({ kind: 'wall' });
+    expect(surfaceAhead(mask, W, H, W - 1, 100, 1)).toEqual({ kind: 'wall' });
+  });
+
+  it('steps onto a shelf inside the window rather than walking under it', () => {
+    // Top-down scanning means the HIGHEST surface in the window wins. A gap
+    // shorter than the step window is not space a character could use, so this
+    // is what "step up" means — and it is what GunBound does.
+    const heights = Array.from({ length: W }, (_, x) => (x >= 101 ? 97 : 100));
+    const mask = makeMask(heights, Array.from({ length: W }, (_, x) => (x >= 101 ? 96 : -1)));
+    expect(surfaceAhead(mask, W, H, 100, 100, 1)).toEqual({ kind: 'surface', y: 97 });
+  });
+
   it('ignores a roof over the ground it is reading', () => {
     // A crater blown into a hillside leaves exactly this: a walkable floor with
     // rock overhead. Under the old box model the roof was measured AS the
@@ -333,6 +351,13 @@ describe('walking over terrain', () => {
     const b = body(100, 100);
     const { result } = walkRun(mask, b, 1, 100);
     expect({ x: b.x, result }).toEqual({ x: 149, result: 'blocked' });
+  });
+
+  it('refuses the map edge instead of walking off it', () => {
+    const mask = makeMask(flat(100));
+    const b = body(5, 100);
+    const { result } = walkRun(mask, b, -1, 50);
+    expect({ x: b.x, result }).toEqual({ x: 0, result: 'blocked' });
   });
 
   it('walks under an overhang on open ground', () => {
