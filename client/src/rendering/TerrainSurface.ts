@@ -130,27 +130,26 @@ export class TerrainSurface {
     this.sprite.x = 0;
     this.sprite.y = 0;
 
-    // The scorch layer sits over the terrain, multiplied in and clipped by the
-    // terrain's alpha — the whole trick: it can only darken where there is
-    // terrain.
+    // The scorch layer sits over the terrain, multiplied in. It has NO display
+    // mask: the clip is baked into the scorch texture at render time (see
+    // paintRun), so the per-frame composite is a plain multiply with nothing to
+    // re-process — a display mask on a full-map sprite is what flickered the
+    // terrain edges.
     this.scorchSprite = new PIXI.Sprite(this.scorchTexture);
     this.scorchSprite.x = 0;
     this.scorchSprite.y = 0;
     this.scorchSprite.blendMode = 'multiply';
 
-    // A mask object is EXCLUDED from its parent's normal render in Pixi 8, so
-    // the terrain sprite itself can never be the mask — it would stop being
-    // drawn. The mask is a separate sprite of the SAME terrain texture, added
-    // to the tree only so it is rendered AS the mask (it is excluded from the
-    // parent's child pass, so it does not draw a duplicate terrain). The terrain
-    // sprite renders, and the scorch is clipped to terrain.
+    // The terrain alpha, used only as a render-time mask while drawing scorch
+    // discs into the scorch texture. Not a scene child: it must not be rendered
+    // as a duplicate terrain, and masking the scratch (not the sprite) is what
+    // clips the scorch to terrain without a per-frame composite.
     this.maskSprite = new PIXI.Sprite(this.texture);
     this.maskSprite.x = 0;
     this.maskSprite.y = 0;
-    this.scorchSprite.mask = this.maskSprite;
 
     this.root = new PIXI.Container();
-    this.root.addChild(this.sprite, this.scorchSprite, this.maskSprite);
+    this.root.addChild(this.sprite, this.scorchSprite);
   }
 
   /** The display object to place in the scene where terrain belongs. */
@@ -223,11 +222,18 @@ export class TerrainSurface {
       if (hasScorch) {
         g.fill({ color: SCORCH_COLOR, alpha: SCORCH_ALPHA });
         g.blendMode = 'normal';
+        // Clip the scorch discs to the terrain's CURRENT alpha, so a burn only
+        // lands on existing terrain. The mask reads the terrain texture; the
+        // target is the scorch texture — different textures, so there is no
+        // read-write feedback. Baking the clip in is why the scorch sprite needs
+        // no display mask (and doesn't flicker the terrain edges).
+        this.scratch.mask = this.maskSprite;
         this.renderer.render({
           container: this.paintRoot,
           target: this.scorchTexture,
           clear: false,
         });
+        this.scratch.mask = null;
       }
 
       // Erase pass into the terrain texture: the crater itself plus any
