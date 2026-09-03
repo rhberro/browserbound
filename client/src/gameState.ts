@@ -517,4 +517,95 @@ export class GameState {
   getGameState() {
     return this.room?.state || null;
   }
+
+  // Lobby and room management methods
+  async createRoom(options: { mode: string; roomName: string; ffaCount?: number }): Promise<string> {
+    const { data: { session } } = await (await import('./supabase')).supabase.auth.getSession();
+    if (!session) throw new Error('Not authenticated');
+
+    this.room = await this.client.create('game', {
+      mode: options.mode,
+      roomName: options.roomName,
+      ffaCount: options.ffaCount,
+      userId: session.user.id,
+      displayName: session.user.user_metadata?.display_name || session.user.email,
+    } as any);
+
+    this.setupRoomHandlers();
+    return (this.room as any).roomId || '';
+  }
+
+  async joinRoom(roomId: string): Promise<void> {
+    const { data: { session } } = await (await import('./supabase')).supabase.auth.getSession();
+    if (!session) throw new Error('Not authenticated');
+
+    this.room = await this.client.joinById('game', roomId, {
+      userId: session.user.id,
+      displayName: session.user.user_metadata?.display_name || session.user.email,
+    } as any);
+
+    this.setupRoomHandlers();
+  }
+
+  async discoverRooms(): Promise<any[]> {
+    const lobby = await this.client.joinOrCreate('lobby');
+
+    return new Promise((resolve) => {
+      const rooms: any[] = [];
+
+      const cleanup = lobby.onMessage('rooms', (message: any) => {
+        if (message && Array.isArray(message)) {
+          resolve(message.filter((room: any) => !room.metadata?.unlisted));
+        }
+      });
+
+      setTimeout(() => {
+        cleanup();
+        resolve(rooms);
+      }, 5000);
+    });
+  }
+
+  claimSeat(seatIndex: number) {
+    if (this.room) {
+      this.room.send('claimSeat', { seatIndex });
+    }
+  }
+
+  setReady(ready: boolean) {
+    if (this.room) {
+      this.room.send('setReady', { ready });
+    }
+  }
+
+  startGame() {
+    if (this.room) {
+      this.room.send('startGame');
+    }
+  }
+
+  private setupRoomHandlers(): void {
+    if (!this.room) return;
+
+    this.room.onMessage('collision', (message: any) => {
+      this.collision = { ...message, time: Date.now(), x: message.x || 0, y: message.y || 0, removedPixels: message.removedPixels || 0 };
+    });
+
+    this.room.onMessage('terrainSync', (message: any) => {
+      this.pendingMapId = message.mapId;
+      this.pendingTerrainOps = message.ops || [];
+    });
+
+    this.room.onMessage('rematchReady', (message: any) => {
+      if (this.onRematchReady) {
+        this.onRematchReady(message.ready, message.of);
+      }
+    });
+
+    this.room.onMessage('blocked', () => {
+      if (this.onBlocked) {
+        this.onBlocked();
+      }
+    });
+  }
 }
