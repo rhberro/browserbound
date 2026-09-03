@@ -4,6 +4,7 @@ import {
   POWER_SCALE, GRAVITY, WIND_INTEGRATION, TerrainOp, MAP_WIDTH, MAP_HEIGHT,
   DEFAULT_CRATER_RADIUS, applyOpToBitmap, collapseLips, PLAYER_HEIGHT,
   MOVE_BUDGET, WALK_SPEED, TURN_TIME_MS, TERMINAL_VELOCITY,
+  PROJECTILE_MAX_LIFETIME_FRAMES,
   AIM_MIN_DEG, AIM_MAX_DEG,
   walkStep, settle, testCollisionY, pushOutOfWall, airborneHorizontal, computeTilt, Body,
 } from '@browserbond/shared';
@@ -65,6 +66,12 @@ class GameProjectile {
   id: string;
   fireFrame: number; // Frame quando o projétil foi disparado
   weaponType: number; // Weapon that fired this projectile
+  /**
+   * Frame at which this projectile entered the ACTIVE list. Set on activation
+   * rather than at construction, so a staggered burst shot is not aged out for
+   * the frames it spent queued. See PROJECTILE_MAX_LIFETIME_FRAMES.
+   */
+  activatedFrame: number = 0;
 
   constructor(x: number, y: number, vx: number, vy: number, firedBy: string, fireFrame: number = 0, weaponType: number = 1) {
     this.x = x;
@@ -169,8 +176,13 @@ export class GameRoom extends Room<GameState> {
     });
 
     this.onMessage('aimAngle', (client, data: { angle: number }) => {
+      const validation = this.validator.validateAimMessage(data, this.buildValidationGameState(), client.sessionId);
+      if (!validation.valid) {
+        console.warn(`[Aim] ${validation.reason} from ${client.sessionId}`);
+        return;
+      }
       const player = this.state.players.get(client.sessionId);
-      if (!player || this.state.currentPlayerId !== client.sessionId) return;
+      if (!player) return;
 
       // Clamp chassis-relative aim angle to valid range (in degrees, convert to radians)
       const clampedDeg = Math.max(AIM_MIN_DEG, Math.min(AIM_MAX_DEG, data.angle));
@@ -228,6 +240,7 @@ export class GameRoom extends Room<GameState> {
 
         // If fireFrame is 0, add to active projectiles; otherwise add to pending
         if (spec.fireFrame === 0) {
+          proj.activatedFrame = this.currentFrame;
           this.projectiles.push(proj);
         } else {
           this.pendingProjectiles.push(proj);
@@ -285,6 +298,7 @@ export class GameRoom extends Room<GameState> {
     // Verificar se há projéteis pendentes que devem ser ativados
     this.pendingProjectiles = this.pendingProjectiles.filter((proj) => {
       if (proj.fireFrame <= this.currentFrame) {
+        proj.activatedFrame = this.currentFrame;
         this.projectiles.push(proj);
         return false; // Remove da fila pendente
       }
@@ -345,6 +359,27 @@ export class GameRoom extends Room<GameState> {
       // Out of bounds
       if (!collision && (proj.y < -50 || proj.y > MAP_HEIGHT + 50 || proj.x < -50 || proj.x > MAP_WIDTH + 50)) {
         collision = { type: 'miss' as const, x: proj.x, y: proj.y };
+      }
+
+      // Lifetime backstop. A projectile still airborne after this long cannot
+      // resolve on its own — every bound above is a comparison, and a NaN
+      // position makes all of them false. Retire it as a miss so the turn loop,
+      // which waits on an empty projectile list, is never held open forever.
+      // Deliberately NOT a terrain-destroying impact: nothing legitimate gets
+      // here, so it must not dig a crater at a nonsense position.
+      if (!collision && this.currentFrame - proj.activatedFrame >= PROJECTILE_MAX_LIFETIME_FRAMES) {
+        console.warn(
+          `[Projectile] ${proj.id} expired after ${PROJECTILE_MAX_LIFETIME_FRAMES} frames at (${proj.x}, ${proj.y})`
+        );
+        this.broadcast('collision', {
+          type: 'miss',
+          projectileId: proj.id,
+          x: proj.x,
+          y: proj.y,
+          affectedPlayers: [],
+        });
+        projectilesToRemove.push(proj.id);
+        continue;
       }
 
       if (collision) {

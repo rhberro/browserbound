@@ -148,6 +148,55 @@ describe('MessageValidationAdapter', () => {
       expect(result.reason).toContain('active projectiles');
     });
 
+    // A range comparison against a non-number is silently false, so every
+    // bound below used to pass a malformed payload straight through to the
+    // physics. The resulting NaN velocity produced a projectile that could
+    // never resolve, and the turn loop waits on an empty projectile list — so
+    // one of these messages froze the room permanently, for both players.
+    describe('non-numeric payloads', () => {
+      const NOT_NUMBERS = [
+        ['an object', {}],
+        ['an array', []],
+        ['a string', '50'],
+        ['null', null],
+        ['undefined', undefined],
+        ['NaN', NaN],
+        ['Infinity', Infinity],
+        ['-Infinity', -Infinity],
+      ] as const;
+
+      for (const [label, value] of NOT_NUMBERS) {
+        it(`rejects fire with ${label} as power`, () => {
+          const result = validator.validateFireMessage(
+            { angle: Math.PI / 4, power: value as never, weaponType: 1 },
+            gameState,
+            'player-1'
+          );
+          expect(result.valid).toBe(false);
+          expect(result.reason).toContain('power');
+        });
+
+        it(`rejects fire with ${label} as angle`, () => {
+          const result = validator.validateFireMessage(
+            { angle: value as never, power: 50, weaponType: 1 },
+            gameState,
+            'player-1'
+          );
+          expect(result.valid).toBe(false);
+          expect(result.reason).toContain('angle');
+        });
+      }
+
+      it('rejects a fire message that is not an object at all', () => {
+        expect(validator.validateFireMessage(null as never, gameState, 'player-1').valid).toBe(
+          false
+        );
+        expect(validator.validateFireMessage('fire' as never, gameState, 'player-1').valid).toBe(
+          false
+        );
+      });
+    });
+
     it('allows fire when other player has projectiles', () => {
       gameState.projectiles.set('proj-1', { x: 100, y: 100, firedBy: 'player-2' } as any);
       const result = validator.validateFireMessage(
@@ -385,4 +434,46 @@ describe('MessageValidationAdapter', () => {
       expect(result.valid).toBe(true);
     });
   });
+
+  describe('validateAimMessage', () => {
+    it('accepts a numeric aim angle', () => {
+      const result = validator.validateAimMessage({ angle: 45 }, gameState, 'player-1');
+      expect(result.valid).toBe(true);
+    });
+
+    it('accepts an aim angle outside the permitted range, for the server to clamp', () => {
+      // Out-of-range aim is clamped rather than rejected (ADR 0003: the barrel
+      // stops moving, firing is never blocked). Validation only has to
+      // guarantee the value is a number the clamp can act on.
+      expect(validator.validateAimMessage({ angle: 999 }, gameState, 'player-1').valid).toBe(true);
+      expect(validator.validateAimMessage({ angle: -999 }, gameState, 'player-1').valid).toBe(true);
+    });
+
+    it('rejects aim when the player is not in the current turn', () => {
+      const result = validator.validateAimMessage({ angle: 45 }, gameState, 'player-2');
+      expect(result.valid).toBe(false);
+      expect(result.reason).toContain('not in current turn');
+    });
+
+    it('rejects aim when the player does not exist', () => {
+      const result = validator.validateAimMessage({ angle: 45 }, gameState, 'ghost');
+      expect(result.valid).toBe(false);
+    });
+
+    // Same hole as the fire message by a different route: an unvalidated aim
+    // angle becomes a NaN chassis-relative angle, and the next legitimate shot
+    // produces the same unresolvable projectile.
+    it('rejects a non-numeric aim angle', () => {
+      for (const value of [{}, [], '45', null, undefined, NaN, Infinity]) {
+        const result = validator.validateAimMessage({ angle: value as never }, gameState, 'player-1');
+        expect(result.valid, `angle=${String(value)}`).toBe(false);
+        expect(result.reason).toContain('angle');
+      }
+    });
+
+    it('rejects an aim message that is not an object at all', () => {
+      expect(validator.validateAimMessage(null as never, gameState, 'player-1').valid).toBe(false);
+    });
+  });
+
 });

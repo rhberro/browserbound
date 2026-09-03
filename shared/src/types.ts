@@ -115,6 +115,24 @@ export const TERMINAL_VELOCITY = 12;
 /** A turn with no shot passes after this long. */
 export const TURN_TIME_MS = 30000;
 
+/**
+ * Hard cap on how long a single projectile may stay in the air, in simulation
+ * frames. At the 16ms tick that is 10 seconds.
+ *
+ * This is a BACKSTOP, not a game rule. Nothing legitimate reaches it: the map
+ * is 2000px wide and a full-power shot crosses it in well under a second, so a
+ * projectile still alive at 10 seconds is a projectile that cannot resolve —
+ * historically a NaN one, whose ray-march never ran and whose out-of-bounds
+ * comparisons were all false.
+ *
+ * The turn clock only advances once the active projectile list is empty, so
+ * without this cap a single unresolvable projectile freezes the room for every
+ * player in it, permanently. Keep the cap even once the specific NaN route is
+ * closed: the failure mode is far too severe to leave guarded in only one
+ * place.
+ */
+export const PROJECTILE_MAX_LIFETIME_FRAMES = 625;
+
 /** Half the track length used for the chassis tilt secant. */
 export const TILT_OFFSET_X = 12;
 /**

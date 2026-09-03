@@ -19,6 +19,10 @@ interface FireMessage {
   weaponType: number;
 }
 
+interface AimMessage {
+  angle: number;
+}
+
 interface MoveMessage {
   left: boolean;
   right: boolean;
@@ -44,6 +48,27 @@ interface GameStateForValidation {
   projectiles: Map<string, { x: number; y: number; firedBy?: string }>;
 }
 
+/**
+ * True only for a real, finite JavaScript number.
+ *
+ * Every range check in this file is a comparison, and a comparison against a
+ * non-number is silently false — so `power > 100` waves an object, a string or
+ * NaN straight through. Downstream that becomes a NaN velocity, and a NaN
+ * projectile can neither collide (its ray-march step count is NaN, so the loop
+ * body never runs) nor go out of bounds (every comparison against NaN is
+ * false). It stays in the active list forever and the turn never passes.
+ *
+ * Type before range, on every numeric field that crosses the wire.
+ */
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
+/** Messages arrive as untyped JSON; a non-object payload has no fields to read. */
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
 export class MessageValidationAdapter {
   private static readonly ANGLE_MIN = 0;
   private static readonly ANGLE_MAX = Math.PI;
@@ -57,6 +82,18 @@ export class MessageValidationAdapter {
     gameState: GameStateForValidation,
     playerId: string
   ): ValidationResult {
+    // 0. Payload must be an object with genuinely numeric fields, BEFORE any
+    //    range check — see isFiniteNumber.
+    if (!isObject(message)) {
+      return { valid: false, reason: 'fire message is not an object' };
+    }
+    if (!isFiniteNumber(message.angle)) {
+      return { valid: false, reason: 'angle must be a finite number' };
+    }
+    if (!isFiniteNumber(message.power)) {
+      return { valid: false, reason: 'power must be a finite number' };
+    }
+
     // 1. Player must be in current turn
     if (gameState.currentPlayerId !== playerId) {
       return { valid: false, reason: 'player not in current turn' };
@@ -91,11 +128,44 @@ export class MessageValidationAdapter {
     return { valid: true };
   }
 
+  /**
+   * Aim carries no bounds check on purpose.
+   *
+   * ADR 0003 makes out-of-range aim a CLAMP, not a rejection: the barrel stops
+   * moving and firing is never blocked. What the clamp cannot survive is a
+   * non-number, which passes straight through `Math.max`/`Math.min` as NaN and
+   * poisons the next legitimate shot. So this validates the type and the turn,
+   * and leaves the range to the clamp.
+   */
+  validateAimMessage(
+    message: AimMessage,
+    gameState: GameStateForValidation,
+    playerId: string
+  ): ValidationResult {
+    if (!isObject(message)) {
+      return { valid: false, reason: 'aim message is not an object' };
+    }
+    if (!isFiniteNumber(message.angle)) {
+      return { valid: false, reason: 'angle must be a finite number' };
+    }
+    if (!gameState.players.has(playerId)) {
+      return { valid: false, reason: 'player not found' };
+    }
+    if (gameState.currentPlayerId !== playerId) {
+      return { valid: false, reason: 'player not in current turn' };
+    }
+    return { valid: true };
+  }
+
   validateMoveMessage(
     message: MoveMessage,
     gameState: GameStateForValidation,
     playerId: string
   ): ValidationResult {
+    if (!isObject(message)) {
+      return { valid: false, reason: 'move message is not an object' };
+    }
+
     // 1. Player must exist
     const player = gameState.players.get(playerId);
     if (!player) {
@@ -125,6 +195,10 @@ export class MessageValidationAdapter {
     message: ProjectileUpdateMessage,
     gameState: GameStateForValidation
   ): ValidationResult {
+    if (!isObject(message) || !isFiniteNumber(message.x) || !isFiniteNumber(message.y)) {
+      return { valid: false, reason: 'projectile update position must be finite numbers' };
+    }
+
     // 1. Projectile must exist
     const projectile = gameState.projectiles.get(message.projectileId);
     if (!projectile) {
@@ -154,6 +228,10 @@ export class MessageValidationAdapter {
   }
 
   validateCollisionMessage(message: CollisionMessage, gameState: GameStateForValidation): ValidationResult {
+    if (!isObject(message) || !isFiniteNumber(message.x) || !isFiniteNumber(message.y)) {
+      return { valid: false, reason: 'collision position must be finite numbers' };
+    }
+
     // 1. Projectile must exist
     if (!gameState.projectiles.has(message.projectileId)) {
       return { valid: false, reason: `projectile ${message.projectileId} not found` };
