@@ -32,14 +32,13 @@ export class Player extends Schema {
   @type('boolean') airborne = false;
   /**
    * Chassis tilt in radians, in SCREEN space (y grows downward), so ground
-   * rising to the right is negative. Zero when airborne. Purely visual: it
-   * leans the sprite and its hitbox, and no longer enters the aim or firing
-   * math.
+   * rising to the right is negative. Zero when airborne. Never combine this
+   * with an aim angle by hand — see `worldFiringAngle`.
    */
   @type('number') tilt = 0;
   /**
-   * Aim angle in radians, measured from the horizontal in the facing direction
-   * (world-absolute), clamped to [AIM_MIN_DEG, AIM_MAX_DEG].
+   * Aim angle in radians, measured RELATIVE TO THE CHASSIS, clamped to
+   * [AIM_MIN_DEG, AIM_MAX_DEG].
    *
    * SYNCHRONIZED AND CONSUMED, deliberately. A comment beside the server's aim
    * handler used to claim aim was "exclusive to each player's UI" while this

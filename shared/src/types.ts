@@ -202,7 +202,7 @@ export const TILT_OFFSET_X = 12;
  */
 export const TILT_WINDOW_Y = 25;
 
-/** Aim limits, in degrees, measured from the horizontal (world-absolute). See ADR 0003. */
+/** Aim limits, in degrees, measured RELATIVE TO THE CHASSIS. See ADR 0003. */
 export const AIM_MIN_DEG = -20;
 export const AIM_MAX_DEG = 90;
 

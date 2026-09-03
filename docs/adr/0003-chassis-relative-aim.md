@@ -70,22 +70,3 @@ failure mode. Clamping explains itself: the barrel stops moving.
 **Preserving the world angle across tilt changes** (barrel counter-rotates as you walk, shot stays
 on target). Rejected because it is cosmetic tilt wearing a costume — if the world angle survives
 every tilt change, the ground never affects the shot.
-
-## Amendment — aim is world-absolute, chassis tilt is cosmetic
-
-Accepted — 2026-09-03, superseding this ADR's original "chassis-relative aim".
-
-The original decision made aim a measurement against the tilted chassis, and had the HUD show that
-chassis-relative value. Play revealed the sharp edge this ADR warned about, and it was sharper than
-expected: when a character is knocked onto different ground its tilt changes, and the number the
-HUD keeps showing no longer describes the same shot. The player's remembered 45° silently became a
-different 45°, and the HUD was the lie.
-
-So aim is now **measured from the horizontal** — world-absolute — and the HUD shows that world
-angle. Chassis tilt is cosmetic: the body and its oriented hitbox still lean with the slope, but
-the tilt no longer enters the firing direction. The aim range (`AIM_MIN_DEG`..`AIM_MAX_DEG`) is now
-world-absolute in the facing direction, so it is the same on any slope and never denied by tilt.
-
-The single conversion that turned chassis-relative aim into a world firing direction lost its tilt
-term; the facing mirror is all that remains, and it still lives in one shared place so the server's
-fire path and the client's aim line cannot drift.

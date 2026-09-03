@@ -273,9 +273,10 @@ export class RendererAdapter {
       // someone thinking and someone whose connection dropped.
       root.alpha = player.connected === false ? 0.35 + 0.25 * Math.sin(now / 200) : 1;
 
-      // The chassis leans with the slope, purely visually now that aim is
-      // world-absolute (ADR 0003, as amended) — the health bars stay level so
-      // they stay readable however far the body leans.
+      // ADR 0003 rejected cosmetic tilt in the other direction too: a chassis
+      // that does not visibly lean while the shot obeys the slope is just as
+      // much a lie as a shot that ignores a visible lean. Only the chassis
+      // rotates — the health bars stay level.
       sprite.chassis.rotation = player.tilt;
 
       this.updateHealthBar(sprite, player.health);
@@ -382,7 +383,7 @@ export class RendererAdapter {
     sprite.angleIndicator.x = pos.x;
     sprite.angleIndicator.y = pos.y;
     // Firing angles are y-up and Pixi rotation is y-down, so the screen
-    // rotation is the negation.
+    // rotation is the negation. Same trap as the tilt sign in worldFiringAngle.
     sprite.angleIndicator.rotation = -this.aimDirection(playerId, player, aimState);
   }
 
@@ -466,7 +467,7 @@ export class RendererAdapter {
     const isLocal = playerId === this.localPlayerId;
     const aimAngle =
       isLocal && aimState ? degToRad(aimState.angleDeg) : player.aimAngle;
-    return worldFiringAngle({ aimAngle, facing: player.facing || 1 });
+    return worldFiringAngle({ tilt: player.tilt, aimAngle, facing: player.facing || 1 });
   }
 
   /**

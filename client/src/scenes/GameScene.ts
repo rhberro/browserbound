@@ -164,7 +164,7 @@ export class GameScene {
     if (!this.gameState.isMyTurn()) return;
 
     // Power and weapon only. The firing direction is the server's, computed
-    // from the aim angle already sent and the facing.
+    // from the aim angle already sent, the chassis tilt and the facing.
     const aimState = this.inputAdapter.getAimState();
     this.gameState.fire(aimState.power, this.inputAdapter.getSelectedWeapon());
     this.inputAdapter.resetAfterFire();
