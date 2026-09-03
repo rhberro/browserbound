@@ -243,6 +243,11 @@ export class GameRoom extends Room<GameState> {
         this.clientLastActivity.delete(clientId);
         if (this.state.players.has(clientId)) {
           this.state.players.delete(clientId);
+          // Clean up player tracking state to prevent memory leaks
+          this.playerInputs.delete(clientId);
+          this.walkCarry.delete(clientId);
+          this.blockedNotified.delete(clientId);
+          this.airborneVxCarry.delete(clientId);
           if (this.state.currentPlayerId === clientId) {
             const playerIds = Array.from(this.state.players.keys());
             if (playerIds[0]) {
@@ -358,6 +363,9 @@ export class GameRoom extends Room<GameState> {
           }
         }
 
+        // Always destroy terrain at impact point, regardless of collision type
+        this.destroyTerrain(collision.x, collision.y, weapon.craterRadius);
+
         // Broadcast collision details
         if (collision.type === 'player') {
           this.broadcast('collision', {
@@ -372,8 +380,6 @@ export class GameRoom extends Room<GameState> {
             }),
           });
         } else if (collision.type === 'terrain') {
-          this.destroyTerrain(collision.x, collision.y, weapon.craterRadius);
-
           this.broadcast('collision', {
             type: 'terrain',
             projectileId: proj.id,
@@ -445,10 +451,17 @@ export class GameRoom extends Room<GameState> {
         player.vx = Math.max(-TERMINAL_VELOCITY, Math.min(player.vx, TERMINAL_VELOCITY));
 
         // Horizontal movement: try lifting when blocked, bounce if all lifts fail.
+        // Accumulate fractional velocity like walkCarry does for walking movement.
         // For each pixel of movement, call airborneHorizontal which applies damping
         // on successful climbs or bounces on wall contact.
-        const vxPixels = Math.floor(Math.abs(player.vx));
-        for (let i = 0; i < vxPixels; i++) {
+        const vxCarry = this.airborneVxCarry.get(playerId) ?? 0;
+        const vxTotal = vxCarry + player.vx;
+        const vxPixels = Math.floor(Math.abs(vxTotal));
+
+        // Process remaining pixels until exhausted or velocity reverses
+        let remaining = vxPixels;
+        while (remaining > 0) {
+          const oldDir = Math.sign(player.vx) || 0;
           player.vx = airborneHorizontal(
             this.terrainBitmap,
             MAP_WIDTH,
@@ -456,14 +469,24 @@ export class GameRoom extends Room<GameState> {
             body,
             player.vx
           );
+          const newDir = Math.sign(player.vx) || 0;
+
+          // If direction reversed (bounced) or velocity became negligible, stop moving
+          if (oldDir !== 0 && newDir !== oldDir) break;
+          if (Math.abs(player.vx) < 0.01) break;
+
+          remaining--;
         }
 
+        // Store fractional component for next frame
+        this.airborneVxCarry.set(playerId, vxTotal - Math.sign(vxTotal) * vxPixels);
+
         // Descend one pixel at a time so a fast fall cannot tunnel through thin ground.
-        let remaining = player.vy;
-        while (remaining > 0) {
-          const stepPx = Math.min(1, remaining);
+        let remainingVy = player.vy;
+        while (remainingVy > 0) {
+          const stepPx = Math.min(1, remainingVy);
           body.y += stepPx;
-          remaining -= stepPx;
+          remainingVy -= stepPx;
           if (testCollisionY(this.terrainBitmap, MAP_WIDTH, MAP_HEIGHT, body, 1)) {
             settle(this.terrainBitmap, MAP_WIDTH, MAP_HEIGHT, body);
             player.vy = 0;
@@ -559,6 +582,7 @@ export class GameRoom extends Room<GameState> {
     if (player) player.movementBudget = MOVE_BUDGET;
     this.state.turnEndsAt = Date.now() + TURN_TIME_MS;
     this.walkCarry.set(playerId, 0);
+    this.airborneVxCarry.set(playerId, 0);
     this.blockedNotified.delete(playerId);
   }
 
@@ -616,6 +640,12 @@ export class GameRoom extends Room<GameState> {
 
     this.state.players.delete(playerId);
     this.playerInputs.delete(playerId);
+
+    // Clean up player tracking state to prevent memory leaks
+    this.walkCarry.delete(playerId);
+    this.blockedNotified.delete(playerId);
+    this.airborneVxCarry.delete(playerId);
+    this.clientLastActivity.delete(playerId);
 
     // Any projectile fired by the dead player keeps flying, but the turn must
     // move on to a survivor right away.

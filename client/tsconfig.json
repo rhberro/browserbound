@@ -5,6 +5,7 @@
     "rootDir": "./src",
     "lib": ["ES2020", "DOM", "DOM.Iterable"],
     "jsx": "react-jsx",
+    "jsxImportSource": "preact",
     "moduleResolution": "node"
   },
   "include": ["src"]

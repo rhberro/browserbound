@@ -3,7 +3,8 @@ import { GameState } from '../gameState';
 import { InputAdapter } from '../adapters/InputAdapter';
 import { CameraAdapter } from '../adapters/CameraAdapter';
 import { RendererAdapter } from '../adapters/RendererAdapter';
-import { HUDAdapter } from '../adapters/HUDAdapter';
+import { mountHud } from '../ui/mountHud';
+import { syncHudSignals } from '../ui/signals';
 
 export class GameScene {
   private app: PIXI.Application;
@@ -14,7 +15,6 @@ export class GameScene {
   private inputAdapter: InputAdapter;
   private cameraAdapter: CameraAdapter;
   private rendererAdapter: RendererAdapter;
-  private hudAdapter: HUDAdapter;
 
   constructor(app: PIXI.Application, gameState: GameState) {
     this.app = app;
@@ -26,9 +26,13 @@ export class GameScene {
     this.inputAdapter = new InputAdapter(gameState);
     this.cameraAdapter = new CameraAdapter(app, this.container);
     this.rendererAdapter = new RendererAdapter(app, this.container);
-    this.hudAdapter = new HUDAdapter(gameState, this.inputAdapter);
 
-    // Set up terrain operations
+    // Set up terrain. Map before ops: the renderer holds queued craters until
+    // the map PNG has been painted, so destruction lands on top of the ground
+    // rather than being wiped by the arriving map (ADR 0002).
+    this.gameState.setOnMapLoad((mapId) => {
+      void this.rendererAdapter.loadMap(mapId);
+    });
     this.gameState.setOnTerrainOp((op) => this.rendererAdapter.applyTerrainOp(op));
 
     // Blow up players the moment the server reports them dead
@@ -36,11 +40,8 @@ export class GameScene {
       this.rendererAdapter.spawnDeathExplosion(x, y);
     };
 
-    // Set up input after a short delay to ensure DOM is ready
-    setTimeout(() => {
-      this.inputAdapter.setupInput();
-      this.hudAdapter.initialize();
-    }, 100);
+    this.inputAdapter.setupInput();
+    mountHud(this.inputAdapter);
   }
 
   private getMyPlayer() {
@@ -94,15 +95,8 @@ export class GameScene {
     // Advance any death explosions
     this.rendererAdapter.updateDeathExplosions();
 
-    // Update UI with current state
-    this.rendererAdapter.updateUI(
-      this.gameState,
-      aimState,
-      this.inputAdapter.getSelectedWeapon()
-    );
-
-    // Update HUD
-    this.hudAdapter.update(aimState);
+    // Push this frame's state into the HUD
+    syncHudSignals(this.gameState, this.inputAdapter);
 
     // Clear collision state after explosion finishes
     if (this.gameState.collision) {

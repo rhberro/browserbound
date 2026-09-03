@@ -9,11 +9,16 @@
   },
   "dependencies": {
     "@browserbond/shared": "workspace:*",
+    "@preact/signals": "^2.11.1",
     "colyseus.js": "^0.15.0",
-    "pixi.js": "^8.0.0"
+    "pixi.js": "^8.0.0",
+    "preact": "^10.29.8"
   },
   "devDependencies": {
+    "@preact/preset-vite": "^2.10.6",
+    "@tailwindcss/vite": "^4.3.3",
     "@types/node": "^20.0.0",
+    "tailwindcss": "^4.3.3",
     "typescript": "^5.3.0",
     "vite": "^5.0.0"
   }

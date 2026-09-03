@@ -11,6 +11,14 @@ export class GameState {
   public collision: { type: string; x: number; y: number; time: number } | null = null;
   public currentPlayerAimAngle: number = 45;
   public onTerrainOp: ((op: TerrainOp) => void) | null = null;
+
+  /**
+   * Called with the map the room is playing before any of its terrain ops.
+   * The base terrain is a PNG, not an op (ADR 0002) — `terrainSync` names the
+   * map and carries destruction since it loaded.
+   */
+  public onMapLoad: ((mapId: string) => void) | null = null;
+  private pendingMapId: string | null = null;
   public onPlayerHit: ((targetId: string, health: number) => void) | null = null;
   public onPlayerDied: ((playerId: string, x: number, y: number) => void) | null = null;
   private pendingTerrainOps: TerrainOp[] = [];
@@ -142,7 +150,16 @@ export class GameState {
       }
     });
 
-    this.room.onMessage('terrainSync', (data: { ops: TerrainOp[] }) => {
+    this.room.onMessage('terrainSync', (data: { mapId?: string; ops: TerrainOp[] }) => {
+      // Map first, ops second: the renderer holds its op queue until the map
+      // has been painted, so craters land on top of the ground, not under it.
+      if (data.mapId) {
+        if (this.onMapLoad) {
+          this.onMapLoad(data.mapId);
+        } else {
+          this.pendingMapId = data.mapId;
+        }
+      }
       if (this.onTerrainOp) {
         for (const op of data.ops) {
           this.onTerrainOp(op);
@@ -179,6 +196,19 @@ export class GameState {
       windSpeed: this.room.state.windSpeed,
       windDirection: this.room.state.windDirection,
     };
+  }
+
+  /**
+   * Register the map-load handler. Call this BEFORE `setOnTerrainOp`: if a
+   * `terrainSync` already arrived, both replay their backlog on registration,
+   * and the map has to be requested before the craters queue behind it.
+   */
+  setOnMapLoad(callback: (mapId: string) => void) {
+    this.onMapLoad = callback;
+    if (this.pendingMapId) {
+      callback(this.pendingMapId);
+      this.pendingMapId = null;
+    }
   }
 
   setOnTerrainOp(callback: (op: TerrainOp) => void) {

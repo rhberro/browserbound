@@ -10,7 +10,9 @@
  */
 
 import * as PIXI from 'pixi.js';
-import { MAP_WIDTH, MAP_HEIGHT, TerrainOp } from '@browserbond/shared';
+import { TerrainOp } from '@browserbond/shared';
+import { TerrainSurface } from '../rendering/TerrainSurface';
+import { PlayerMotion } from '../rendering/PlayerMotion';
 import type { AimState } from './InputAdapter';
 
 interface DeathExplosion {
@@ -26,63 +28,65 @@ export class RendererAdapter {
   private container: PIXI.Container;
   private playerSprites: Map<string, PIXI.Container> = new Map();
   private angleIndicators: Map<string, PIXI.Graphics> = new Map();
-  private terrainGraphics: PIXI.Graphics;
+  private terrain: TerrainSurface;
+  private motion: PlayerMotion = new PlayerMotion();
+  private lastFrameTime: number = performance.now();
+  private localPlayerId: string | null = null;
   private aimLine: PIXI.Graphics | null = null;
   private projectileGraphicsMap: Map<string, PIXI.Graphics> = new Map();
   private explosionGraphics: PIXI.Graphics | null = null;
-  private terrainOps: TerrainOp[] = [];
   private explosionDuration: number = 500;
   private deathExplosions: DeathExplosion[] = [];
 
   constructor(app: PIXI.Application, container: PIXI.Container) {
     this.container = container;
 
-    this.terrainGraphics = new PIXI.Graphics();
-    this.container.addChildAt(this.terrainGraphics, 0);
+    this.terrain = new TerrainSurface(app.renderer);
+    this.container.addChildAt(this.terrain.view, 0);
   }
 
   /**
-   * Apply a terrain operation and redraw.
+   * Apply a terrain operation.
+   *
+   * Ops are queued and painted into the persistent terrain texture on the next
+   * frame — O(1) per crater, and craters erase the texture rather than being
+   * overpainted with a sky-coloured disc.
    */
   applyTerrainOp(op: TerrainOp): void {
-    this.terrainOps.push(op);
-    this.redrawTerrain();
+    this.terrain.applyOp(op);
   }
 
   /**
-   * Redraw all terrain from operations.
+   * Replace the placeholder terrain with an authored map PNG.
+   *
+   * Not wired up yet — Phase 1 of the movement/physics plan calls this instead
+   * of relying on the server's `rect` op to paint the ground.
    */
-  private redrawTerrain(): void {
-    this.terrainGraphics.clear();
-
-    // Draw rectangles first (platforms)
-    for (const op of this.terrainOps) {
-      if (op.type === 'rect') {
-        this.terrainGraphics.rect(op.x, op.y, op.width, op.height);
-        this.terrainGraphics.fill(0x8b7355);
-        this.terrainGraphics.stroke({ width: 0 });
-      }
-    }
-
-    // Draw explosions (sky blue craters)
-    for (const op of this.terrainOps) {
-      if (op.type === 'explosion') {
-        this.terrainGraphics.circle(op.x, op.y, op.radius);
-        this.terrainGraphics.fill(0x87ceeb);
-        this.terrainGraphics.stroke({ width: 0 });
-      }
-    }
+  loadMap(mapId: string): Promise<void> {
+    return this.terrain.loadMapImage(mapId);
   }
 
   /**
    * Update all player sprites and health bars.
    */
   updatePlayers(gameState: any, aimState?: any): void {
+    const now = performance.now();
+    // Clamped so a backgrounded tab doesn't produce one enormous smoothing step.
+    const dtMs = Math.min(100, Math.max(0, now - this.lastFrameTime));
+    this.lastFrameTime = now;
+
+    // Terrain ops arrive on websocket callbacks; paint them from the frame loop
+    // so every render-target switch happens at a well-defined point.
+    this.terrain.flush();
+
+    this.localPlayerId = gameState.getRoomSessionId();
+
     // Remove sprites for players that no longer exist
     for (const [playerId, sprite] of this.playerSprites) {
       if (!gameState.players.has(playerId)) {
         this.container.removeChild(sprite);
         this.playerSprites.delete(playerId);
+        this.motion.remove(playerId);
 
         const angleInd = this.angleIndicators.get(playerId);
         if (angleInd) {
@@ -101,9 +105,12 @@ export class RendererAdapter {
         this.playerSprites.set(playerId, sprite);
       }
 
-      // Update position
-      sprite.x = player.x;
-      sprite.y = player.y;
+      // Update position: the local player is smoothed with no delay, remote
+      // players are interpolated ~2 patches in the past (see PlayerMotion).
+      const isLocal = playerId === this.localPlayerId;
+      const pos = this.motion.update(playerId, player.x, player.y, isLocal, dtMs, now);
+      sprite.x = pos.x;
+      sprite.y = pos.y;
 
       // Update health bar
       const healthBar = sprite.getChildByName('healthBar') as PIXI.Graphics | undefined;
@@ -172,7 +179,10 @@ export class RendererAdapter {
       const relativeAngle = facing === 1 ? angle : 180 - angle;
       const radians = (relativeAngle * Math.PI) / 180;
 
-      this.drawArrow(angleInd, player.x, player.y, radians, 35, 3, 0xffff00);
+      // Anchor to the rendered (interpolated) position so the arrow tracks the
+      // sprite instead of the raw server position it is smoothing toward.
+      const pos = this.motion.getRendered(playerId) ?? { x: player.x, y: player.y };
+      this.drawArrow(angleInd, pos.x, pos.y, radians, 35, 3, 0xffff00);
     } else {
       const angleInd = this.angleIndicators.get(playerId);
       if (angleInd) {
@@ -257,18 +267,23 @@ export class RendererAdapter {
       const relativeAngle = facing === 1 ? aimState.angle : 180 - aimState.angle;
       const radians = (relativeAngle * Math.PI) / 180;
 
+      // Anchor to the rendered position so the line starts on the sprite.
+      const origin =
+        (this.localPlayerId ? this.motion.getRendered(this.localPlayerId) : null) ??
+        { x: myPlayer.x, y: myPlayer.y };
+
       // Full aim line (white)
-      const endX = myPlayer.x + Math.cos(radians) * aimLength;
-      const endY = myPlayer.y - Math.sin(radians) * aimLength;
-      this.aimLine.moveTo(myPlayer.x, myPlayer.y);
+      const endX = origin.x + Math.cos(radians) * aimLength;
+      const endY = origin.y - Math.sin(radians) * aimLength;
+      this.aimLine.moveTo(origin.x, origin.y);
       this.aimLine.lineTo(endX, endY);
       this.aimLine.stroke({ width: 3, color: 0xffffff });
 
       // Power line (green, shorter)
       const powerPercent = (aimState.power / 100) * aimLength;
-      const powerEndX = myPlayer.x + Math.cos(radians) * powerPercent;
-      const powerEndY = myPlayer.y - Math.sin(radians) * powerPercent;
-      this.aimLine.moveTo(myPlayer.x, myPlayer.y);
+      const powerEndX = origin.x + Math.cos(radians) * powerPercent;
+      const powerEndY = origin.y - Math.sin(radians) * powerPercent;
+      this.aimLine.moveTo(origin.x, origin.y);
       this.aimLine.lineTo(powerEndX, powerEndY);
       this.aimLine.stroke({ width: 5, color: 0x00ff00 });
 
@@ -385,67 +400,5 @@ export class RendererAdapter {
 
       return true;
     });
-  }
-
-  /**
-   * Update UI text display.
-   */
-  updateUI(gameState: any, aimState: AimState, selectedWeapon: number): void {
-    const ui = document.getElementById('ui');
-    if (!ui || !gameState.turnState) return;
-
-    const isMyTurn = gameState.isMyTurn();
-    let aimDisplay = '';
-    let weaponDisplay = '';
-
-    if (isMyTurn) {
-      aimDisplay = `
-        <div style="color: #0f0; margin-top: 5px;">
-          Angle: ${aimState.angle.toFixed(0)}° | Power: ${aimState.power.toFixed(0)}%
-        </div>
-      `;
-      if (aimState.isCharging) {
-        aimDisplay += `<div style="color: #ff0;">Charging... Release Space to Fire!</div>`;
-      } else {
-        aimDisplay += `<div style="color: #0f0;">↑/↓: Adjust Angle | A/D: Move | Space: Fire</div>`;
-      }
-
-      weaponDisplay = `
-        <div style="margin-top: 10px; display: flex; gap: 10px;">
-          <div style="padding: 8px 12px; background: ${selectedWeapon === 1 ? '#ffff00' : '#666'}; border: ${selectedWeapon === 1 ? '2px solid #ffff00' : '1px solid #999'}; cursor: pointer;">1: Normal</div>
-          <div style="padding: 8px 12px; background: ${selectedWeapon === 2 ? '#ffff00' : '#666'}; border: ${selectedWeapon === 2 ? '2px solid #ffff00' : '1px solid #999'}; cursor: pointer;">2: Rajada</div>
-          <div style="padding: 8px 12px; background: ${selectedWeapon === 3 ? '#ffff00' : '#666'}; border: ${selectedWeapon === 3 ? '2px solid #ffff00' : '1px solid #999'}; cursor: pointer;">3: Shotgun</div>
-        </div>
-      `;
-    }
-
-    const windDegrees = ((gameState.turnState.windDirection * 180) / Math.PI) % 360;
-    const windArrow = this.getWindArrow(windDegrees);
-
-    ui.innerHTML = `
-      <div style="padding: 10px; background: rgba(0,0,0,0.7); border: 2px solid #0f0; border-radius: 5px;">
-        <div style="font-size: 14px; color: #0f0; margin-bottom: 5px;">
-          🌪️ Wind: <strong>${(gameState.turnState.windSpeed / 100).toFixed(2)}</strong> | Direction: <strong>${windDegrees.toFixed(0)}°</strong> ${windArrow}
-        </div>
-        <div>Turn: ${isMyTurn ? 'YOUR TURN' : 'Opponent Turn'}</div>
-        ${aimDisplay}
-        ${weaponDisplay}
-      </div>
-    `;
-  }
-
-  /**
-   * Convert wind direction degrees to emoji arrow.
-   */
-  private getWindArrow(degrees: number): string {
-    if (degrees >= 337.5 || degrees < 22.5) return '➡️';
-    if (degrees >= 22.5 && degrees < 67.5) return '↗️';
-    if (degrees >= 67.5 && degrees < 112.5) return '⬆️';
-    if (degrees >= 112.5 && degrees < 157.5) return '↖️';
-    if (degrees >= 157.5 && degrees < 202.5) return '⬅️';
-    if (degrees >= 202.5 && degrees < 247.5) return '↙️';
-    if (degrees >= 247.5 && degrees < 292.5) return '⬇️';
-    if (degrees >= 292.5 && degrees < 337.5) return '↘️';
-    return '➡️';
   }
 }

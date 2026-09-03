@@ -103,3 +103,82 @@ This separation enables:
 - [[ADR-0001-physics-adapter]] — Why PhysicsAdapter is stateless and where it sits in the game loop
 - [[server/CONTEXT.md]] — Server-specific: GameRoom's role in managing turn state, collision detection
 - [[client/CONTEXT.md]] — Client-specific: rendering projectiles, UI wind display
+
+## Character Physics & Terrain
+
+### Terrain Mask
+
+The **Terrain Mask** is the authoritative record of which pixels of the world are solid. It is
+authored as an image: a pixel is solid unless it is transparent. The server holds the mask and
+answers every solidity question from it; the client holds a visual copy so what a player sees and
+what the server collides against come from the same source.
+
+The mask changes only by **Terrain Ops** — a rectangle added, or a circle erased. Ops are the only
+thing sent over the wire, so a client that joins late can replay them to reach the current mask.
+
+### Detached Terrain
+
+**Detached Terrain** is any part of the mask no longer connected to the rest of it, produced when
+explosions cut a bridge. Detached terrain **hangs in place**. It does not fall, collapse, or settle.
+
+Distinct from **speckle**: single pixels and hairline filaments left along a crater's edge, which
+are removed because they are visual noise, not because they are detached.
+
+### Collapsed Lip
+
+A **Collapsed Lip** is a thin roof an explosion left over a space too short to stand in. Because a
+character can neither climb it nor pass beneath it, such a roof is removed and the space opened to
+the sky.
+
+A roof is only collapsed when it is *both* thin *and* over an unusable space. A thick roof, or a
+thin roof with room to walk under it, is a cave and survives — caves are the reason terrain is
+recorded per pixel at all.
+
+### Climb Angle
+
+The **Climb Angle** is the steepest slope a character can walk up. It is the game's definition of
+"too steep", and everything else about climbing follows from it.
+
+### Step-Down Limit
+
+The **Step-Down Limit** is the greatest drop a character follows rather than walking off it into a
+fall. It is deliberately *not* the same quantity as the Climb Angle: how steep a hill you can climb
+is a question about the body against the ground, while how far you step down before falling is a
+question about when a ledge becomes a fall.
+
+### Blocked Move
+
+A **Blocked Move** is a walk attempt the terrain refuses: the destination is solid and no rise
+within the Step-Up Limit clears it. A Blocked Move changes nothing — the character does not
+advance, does not rise, and **spends no Movement Budget**. Walking into a wall is free.
+
+### Movement Budget
+
+The **Movement Budget** is the distance a character may walk during its turn, replenished each
+turn. It is spent per pixel actually advanced, so rising and falling are free and a Blocked Move
+costs nothing. Firing ends the turn, and with it any unspent budget.
+
+**Turning is not movement** and is never charged to the budget. A character with nothing left to
+spend can still face either way, and so can always shoot in either direction.
+
+### Chassis Tilt
+
+**Chassis Tilt** is the character's orientation, taken from the slope of the ground beneath it: the
+line between the ground found under its left edge and under its right edge. A character in the air
+has no tilt. Tilt reads the ground far more generously than walking does, so a character tilts to
+terrain it could never climb.
+
+### Chassis-Relative Aim
+
+Aim is measured **against the Chassis**, not against the world. The ground a character stands on
+therefore changes where its shot goes. When Chassis Tilt changes, the aim measurement is preserved
+and the real-world direction moves with the chassis.
+
+Aim is confined to a fixed range relative to the chassis. Terrain that tilts a character far enough
+can press its aim against that limit, denying shots that would be available on level ground.
+
+### Kill Boundary
+
+The **Kill Boundary** is the edge of the world. A character that passes it dies at once, whatever
+its health. It is the only lethal consequence of falling: characters take no damage from impact,
+however far they fall.

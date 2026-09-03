@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>BrowserBound</title>
-    <link rel="stylesheet" href="./src/styles/nocturne.css" />
+    <link rel="stylesheet" href="./src/styles/app.css" />
     <style>
       * {
         margin: 0;
@@ -12,21 +12,22 @@
         box-sizing: border-box;
       }
       body {
-        font-family: Arial, sans-serif;
         overflow: hidden;
-        background: #333;
+        background: #161826;
+        color: #e9e9ed;
+        font-family: "Inter", ui-sans-serif, system-ui, sans-serif;
       }
       #game-container {
         width: 100vw;
         height: 100vh;
       }
-      #ui {
-        position: absolute;
-        top: 10px;
-        left: 10px;
-        color: white;
-        font-size: 14px;
+      /* The HUD is a full-viewport overlay above the canvas. It is inert by
+         default; only the deck and pill inside it opt back into pointer events. */
+      #hud {
+        position: fixed;
+        inset: 0;
         z-index: 10;
+        pointer-events: none;
       }
     </style>
   </head>
