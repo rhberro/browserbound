@@ -75,7 +75,7 @@ export const PLAYER_HEIGHT = 36;
  * one pixel up a slope of gradient `g` it must lift `HALF_WIDTH * g`. Inverting
  * that gives the climb limit below. TUNE.
  */
-export const MAX_CLIMB_ANGLE_DEG = 85;
+export const MAX_CLIMB_ANGLE_DEG = 75;
 
 /**
  * Greatest rise a character may climb per 1px of horizontal travel.
