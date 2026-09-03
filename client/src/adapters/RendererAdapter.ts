@@ -91,6 +91,13 @@ export class RendererAdapter {
   private playerSprites: Map<string, PlayerSprite> = new Map();
   private terrain: TerrainSurface;
   private motion: PlayerMotion = new PlayerMotion();
+  /**
+   * Separate track set for projectiles. Same interpolation, but its own
+   * instance so a projectile id can never collide with a session id, and so
+   * clearing one does not disturb the other.
+   */
+  private projectileMotion: PlayerMotion = new PlayerMotion();
+  private lastProjectileFrameTime: number = performance.now();
   private lastFrameTime: number = performance.now();
   private localPlayerId: string | null = null;
   private aimLine: PIXI.Graphics | null = null;
@@ -314,12 +321,17 @@ export class RendererAdapter {
    * Update projectile graphics.
    */
   updateProjectiles(gameState: GameState): void {
+    const now = performance.now();
+    const dtMs = Math.min(100, Math.max(0, now - this.lastProjectileFrameTime));
+    this.lastProjectileFrameTime = now;
+
     // Remove graphics for projectiles that no longer exist
     for (const [projId, graphics] of this.projectileGraphicsMap) {
       if (!gameState.projectiles.has(projId)) {
         this.container.removeChild(graphics);
         graphics.destroy();
         this.projectileGraphicsMap.delete(projId);
+        this.projectileMotion.remove(projId);
       }
     }
 
@@ -337,8 +349,14 @@ export class RendererAdapter {
         this.projectileGraphicsMap.set(projId, graphics);
       }
 
-      graphics.x = proj.x;
-      graphics.y = proj.y;
+      // Same treatment characters get: server positions arrive at the patch
+      // rate, not the frame rate, so assigning them straight to the sprite
+      // makes a projectile step rather than fly. Always the remote path — a
+      // projectile is nobody's local input, so the interpolation delay costs
+      // nothing and buys a sample on each side.
+      const pos = this.projectileMotion.update(projId, proj.x, proj.y, false, dtMs, now);
+      graphics.x = pos.x;
+      graphics.y = pos.y;
     }
   }
 

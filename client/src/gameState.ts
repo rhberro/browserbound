@@ -4,6 +4,8 @@ import {
   TurnView,
   RoomState,
   Player,
+  Projectile,
+  ProjectileView,
   TerrainOp,
   RECONNECT_WINDOW_SECONDS,
 } from '@browserbond/shared';
@@ -37,7 +39,7 @@ export class GameState {
   private room: Room<RoomState> | null = null;
   public players: Map<string, PlayerView> = new Map();
   public turnState: TurnView | null = null;
-  public projectiles: Map<string, { x: number; y: number }> = new Map();
+  public projectiles: Map<string, ProjectileView> = new Map();
   public collision: { type: string; x: number; y: number; time: number } | null = null;
   public onTerrainOp: ((op: TerrainOp) => void) | null = null;
 
@@ -144,6 +146,23 @@ export class GameState {
       });
     }
 
+    if (this.room?.state && this.room.state.projectiles) {
+      // Projectiles arrive as state like everything else that moves. There is
+      // no announcement message and no per-frame position message: appearing
+      // in this map IS the shot being fired, and leaving it is the shot being
+      // over, however it ended.
+      this.room.state.projectiles.onAdd((proj: Projectile, key: string) => {
+        this.projectiles.set(key, { x: proj.x, y: proj.y });
+        proj.onChange(() => {
+          this.projectiles.set(key, { x: proj.x, y: proj.y });
+        });
+      });
+
+      this.room.state.projectiles.onRemove((_proj: Projectile, key: string) => {
+        this.projectiles.delete(key);
+      });
+    }
+
     if (this.room?.state) {
       // Listen for state changes
       this.room.state.onChange(() => {
@@ -225,31 +244,6 @@ export class GameState {
   private registerMessageHandlers(): void {
     if (!this.room) return;
 
-    this.room.onMessage('projectile', (data) => {
-      this.projectiles.clear();
-      if (data.projectileIds) {
-        for (const id of data.projectileIds) {
-          this.projectiles.set(id, { x: data.startX, y: data.startY });
-        }
-      }
-    });
-
-    this.room.onMessage('projectileUpdate', (data) => {
-      if (data.projectileId) {
-        const proj = this.projectiles.get(data.projectileId);
-        if (proj) {
-          proj.x = data.x;
-          proj.y = data.y;
-        }
-      } else {
-        const firstProj = this.projectiles.values().next().value;
-        if (firstProj) {
-          firstProj.x = data.x;
-          firstProj.y = data.y;
-        }
-      }
-    });
-
     this.room.onMessage('collision', (data) => {
       this.collision = {
         type: data.type,
@@ -264,18 +258,9 @@ export class GameState {
         }
       }
 
-      if (data.projectileId) {
-        this.projectiles.delete(data.projectileId);
-      } else {
-        this.projectiles.clear();
-      }
-    });
-
-    // A projectile the server gave up on: remove it silently. Deliberately no
-    // explosion — there is no trustworthy position to draw one at, which is
-    // the whole reason the server sends no coordinates.
-    this.room.onMessage('projectileExpired', (data: { projectileId: string }) => {
-      this.projectiles.delete(data.projectileId);
+      // Removal is state's job, not this message's. The impact stays a
+      // message because it is an EVENT — it happens once, at a moment — while
+      // the projectile's existence is continuous state.
     });
 
     this.room.onMessage('playerDied', (data: { playerId: string; x: number; y: number }) => {

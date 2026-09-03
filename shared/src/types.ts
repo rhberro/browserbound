@@ -5,18 +5,13 @@
  * it consumes moves. See that file for why.
  */
 
-export interface Projectile {
-  x: number;
-  y: number;
-  vx: number;
-  vy: number;
-}
-
-export interface ProjectileInput {
-  angle: number; // radians
-  power: number; // 0-100
-  weaponType: 'cannon' | 'missile';
-}
+/**
+ * `Projectile` and `ProjectileInput` used to live here, alongside a
+ * ProjectileSimulation in ./physics that re-implemented the trajectory maths
+ * PhysicsAdapter already owned. Nothing called either of them. The projectile
+ * that exists is the synchronized one in ./schema; the integrator that runs it
+ * is PhysicsAdapter.
+ */
 
 export const GRAVITY = 0.4;
 export const POWER_SCALE = 0.3;

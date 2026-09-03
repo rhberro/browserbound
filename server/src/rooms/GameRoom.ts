@@ -7,7 +7,7 @@ import {
   walkStep, settle, testCollisionY, pushOutOfWall, airborneHorizontal, computeTilt, Body,
   pointInBody,
   worldFiringAngle, clampAimDeg, degToRad,
-  Player, RoomState,
+  Player, RoomState, Projectile,
 } from '@browserbond/shared';
 import { PhysicsAdapter, Wind } from '@browserbond/shared/src/adapters/PhysicsAdapter';
 import { MessageValidationAdapter } from '@browserbond/shared/src/adapters/MessageValidationAdapter';
@@ -23,32 +23,29 @@ import {
 } from '@browserbond/shared/src/adapters/WeaponConfigAdapter';
 
 
-class GameProjectile {
-  x: number;
-  y: number;
-  vx: number;
-  vy: number;
-  firedBy: string;
-  id: string;
-  fireFrame: number; // Frame quando o projétil foi disparado
-  weaponType: number; // Weapon that fired this projectile
-  /**
-   * Frame at which this projectile entered the ACTIVE list. Set on activation
-   * rather than at construction, so a staggered burst shot is not aged out for
-   * the frames it spent queued. See PROJECTILE_MAX_LIFETIME_FRAMES.
-   */
-  activatedFrame: number = 0;
-
-  constructor(x: number, y: number, vx: number, vy: number, firedBy: string, fireFrame: number = 0, weaponType: number = 1) {
-    this.x = x;
-    this.y = y;
-    this.vx = vx;
-    this.vy = vy;
-    this.firedBy = firedBy;
-    this.id = Math.random().toString(36).substring(7);
-    this.fireFrame = fireFrame;
-    this.weaponType = weaponType;
-  }
+/**
+ * Build a projectile. The schema class carries the synchronized position; the
+ * rest are plain fields the server integrates and the client never sees.
+ */
+function makeProjectile(
+  x: number,
+  y: number,
+  vx: number,
+  vy: number,
+  firedBy: string,
+  fireFrame: number,
+  weaponType: number
+): Projectile {
+  const proj = new Projectile();
+  proj.x = x;
+  proj.y = y;
+  proj.vx = vx;
+  proj.vy = vy;
+  proj.firedBy = firedBy;
+  proj.fireFrame = fireFrame;
+  proj.weaponType = weaponType;
+  proj.id = Math.random().toString(36).substring(7);
+  return proj;
 }
 
 /**
@@ -66,8 +63,12 @@ export class GameRoom extends Room<RoomState> {
   private terrainBitmap: Uint8Array = new Uint8Array(MAP_WIDTH * MAP_HEIGHT);
   private terrainOps: TerrainOp[] = [];
   private playerInputs: Map<string, { left: boolean; right: boolean; jump: boolean }> = new Map();
-  private projectiles: GameProjectile[] = [];
-  private pendingProjectiles: GameProjectile[] = [];
+  /**
+   * Projectiles staged to launch on a later frame (Burst fires at 0, 5, 10).
+   * Deliberately NOT in synchronized state: they do not exist in the world yet,
+   * and a client that could see them would see the shot before it was fired.
+   */
+  private pendingProjectiles: Projectile[] = [];
   private currentFrame: number = 0;
   private physics!: PhysicsAdapter;
   private windManager!: WindManager;
@@ -175,12 +176,9 @@ export class GameRoom extends Room<RoomState> {
       player.movementBudget = 0;
       this.blockedNotified.delete(client.sessionId);
 
-      const projIds: string[] = [];
-      const allAngles: number[] = [];
-
       for (const spec of projectileSpecs) {
         const vel = this.physics.createProjectile(spec.angle, data.power);
-        const proj = new GameProjectile(
+        const proj = makeProjectile(
           player.x,
           player.y,
           vel.vx,
@@ -190,28 +188,16 @@ export class GameRoom extends Room<RoomState> {
           weaponType
         );
 
-        allAngles.push(spec.angle);
-        projIds.push(proj.id);
-
-        // If fireFrame is 0, add to active projectiles; otherwise add to pending
+        // Immediate shots enter the world now; staged ones wait. Either way
+        // the client learns about them from synchronized state, so there is no
+        // announcement broadcast — the old one told clients about projectiles
+        // that had not been fired yet.
         if (spec.fireFrame === 0) {
-          proj.activatedFrame = this.currentFrame;
-          this.projectiles.push(proj);
+          this.activate(proj);
         } else {
           this.pendingProjectiles.push(proj);
         }
       }
-
-      this.broadcast('projectile', {
-        startX: player.x,
-        startY: player.y,
-        projectileIds: projIds,
-        angles: allAngles,
-        power: data.power,
-        weaponType,
-        windSpeed: this.state.windSpeed,
-        windDirection: this.state.windDirection,
-      });
     });
   }
 
@@ -224,9 +210,15 @@ export class GameRoom extends Room<RoomState> {
    */
   private nothingInFlight(): boolean {
     return nothingInFlight({
-      active: this.projectiles.length,
+      active: this.state.projectiles.size,
       pending: this.pendingProjectiles.length,
     });
+  }
+
+  /** Put a staged projectile into the world, where clients can see it. */
+  private activate(proj: Projectile) {
+    proj.activatedFrame = this.currentFrame;
+    this.state.projectiles.set(proj.id, proj);
   }
 
   private isSolidAt(x: number, y: number): boolean {
@@ -254,8 +246,7 @@ export class GameRoom extends Room<RoomState> {
     // Verificar se há projéteis pendentes que devem ser ativados
     this.pendingProjectiles = this.pendingProjectiles.filter((proj) => {
       if (proj.fireFrame <= this.currentFrame) {
-        proj.activatedFrame = this.currentFrame;
-        this.projectiles.push(proj);
+        this.activate(proj);
         return false; // Remove da fila pendente
       }
       return true; // Mantém na fila
@@ -269,7 +260,8 @@ export class GameRoom extends Room<RoomState> {
     this.state.windDirection = wind.angle;
 
     // Update projectiles using PhysicsAdapter
-    this.physics.updateAllProjectiles(this.projectiles, wind);
+    const active = Array.from(this.state.projectiles.values());
+    this.physics.updateAllProjectiles(active, wind);
 
     // Check collisions
     const projectilesToRemove: string[] = [];
@@ -279,16 +271,9 @@ export class GameRoom extends Room<RoomState> {
     // by killing yourself with your own splash.
     const turnOwnerBeforeCollisions = this.state.currentPlayerId;
 
-    for (const proj of this.projectiles) {
+    for (const proj of active) {
       const prevX = proj.x - proj.vx;
       const prevY = proj.y - proj.vy;
-
-      // Enviar posição do projétil para os clientes
-      this.broadcast('projectileUpdate', {
-        projectileId: proj.id,
-        x: proj.x,
-        y: proj.y,
-      });
 
       let collision = null;
 
@@ -333,13 +318,12 @@ export class GameRoom extends Room<RoomState> {
         console.warn(
           `[Projectile] ${proj.id} expired after ${PROJECTILE_MAX_LIFETIME_FRAMES} frames at (${proj.x}, ${proj.y})`
         );
-        // NOT a collision. A collision carries a position, and the position of
-        // an expired projectile is exactly the thing that cannot be trusted —
-        // in the NaN case that reaches this path, broadcasting it would have
-        // the client render an explosion at NaN. This message carries no
-        // coordinates at all: it says only "this projectile is gone", so the
-        // client drops the graphic without drawing anything.
-        this.broadcast('projectileExpired', { projectileId: proj.id });
+        // Deliberately NOT a collision broadcast. A collision carries a
+        // position, and the position of an expired projectile is exactly the
+        // thing that cannot be trusted — in the NaN case that reaches this
+        // path, broadcasting it would have the client draw an explosion at
+        // NaN. Removing it from state below is the whole signal the client
+        // needs: the projectile stops existing, and nothing is drawn.
         projectilesToRemove.push(proj.id);
         continue;
       }
@@ -415,15 +399,19 @@ export class GameRoom extends Room<RoomState> {
       }
     }
 
-    // Remove projectiles that collided
-    this.projectiles = this.projectiles.filter(p => !projectilesToRemove.includes(p.id));
+    // Remove projectiles that resolved. Deleting from the map while the loop
+    // above walks a snapshot of it is safe precisely because `active` is a
+    // snapshot; deleting from the map inside that loop would not be.
+    for (const id of projectilesToRemove) {
+      this.state.projectiles.delete(id);
+    }
 
     // Pass the turn only once nothing is airborne AND nothing is still staged
     // to fire. See shouldAdvanceTurn for why the staged term matters.
     if (
       this.state.currentPlayerId === turnOwnerBeforeCollisions &&
       shouldAdvanceTurn({
-        active: this.projectiles.length,
+        active: this.state.projectiles.size,
         pending: this.pendingProjectiles.length,
         resolvedThisFrame: projectilesToRemove.length,
       })
@@ -732,7 +720,7 @@ export class GameRoom extends Room<RoomState> {
     projectiles: Map<string, { x: number; y: number; firedBy: string }>;
   } {
     // Include both active and pending projectiles to prevent double-firing within single frame
-    const allProjectiles = [...this.projectiles, ...this.pendingProjectiles];
+    const allProjectiles = [...this.state.projectiles.values(), ...this.pendingProjectiles];
     const projectilesMap = new Map(
       allProjectiles.map((proj) => [proj.id, { x: proj.x, y: proj.y, firedBy: proj.firedBy }])
     );

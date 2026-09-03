@@ -43,6 +43,34 @@ export class Player extends Schema {
   @type('boolean') connected = true;
 }
 
+/**
+ * A projectile in flight.
+ *
+ * Only position is synchronized. Velocity, the weapon that fired it and the
+ * frame bookkeeping are plain fields: the server integrates them, the client
+ * has no use for them, and a `@type` on any of them would put them on the wire
+ * every patch for nobody.
+ *
+ * This replaces a per-projectile, per-frame `projectileUpdate` broadcast —
+ * around 190 messages a second per room with a three-projectile weapon — while
+ * every other moving thing in the game already travelled as state.
+ */
+export class Projectile extends Schema {
+  @type('number') x = 0;
+  @type('number') y = 0;
+
+  /** Server-only simulation state. Deliberately not synchronized. */
+  vx = 0;
+  vy = 0;
+  firedBy = '';
+  id = '';
+  /** Frame this projectile is scheduled to launch on (staggered volleys). */
+  fireFrame = 0;
+  /** Frame it actually entered the active set; see PROJECTILE_MAX_LIFETIME_FRAMES. */
+  activatedFrame = 0;
+  weaponType = 1;
+}
+
 export class RoomState extends Schema {
   @type('string') currentPlayerId = '';
   @type('number') windSpeed = 5;
@@ -50,6 +78,8 @@ export class RoomState extends Schema {
   /** Epoch ms at which the current turn passes if nobody fires. */
   @type('number') turnEndsAt = 0;
   @type({ map: Player }) players = new MapSchema<Player>();
+  /** Projectiles currently in flight. Empty between shots. */
+  @type({ map: Projectile }) projectiles = new MapSchema<Projectile>();
 }
 
 /**
@@ -74,7 +104,10 @@ export type PlayerView = Pick<
   | 'connected'
 >;
 
-/** The client's picture of the room, minus the player map it reads separately. */
+/** The client's picture of one projectile. */
+export type ProjectileView = Pick<Projectile, 'x' | 'y'>;
+
+/** The client's picture of the room, minus the maps it reads separately. */
 export type TurnView = Pick<
   RoomState,
   'currentPlayerId' | 'windSpeed' | 'windDirection' | 'turnEndsAt'
