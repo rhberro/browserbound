@@ -264,8 +264,15 @@ export class RendererAdapter {
       this.aimLine = new PIXI.Graphics();
       const aimLength = 100;
       const facing = myPlayer.facing || 1;
-      const relativeAngle = facing === 1 ? aimState.angle : 180 - aimState.angle;
-      const radians = (relativeAngle * Math.PI) / 180;
+
+      // Calculate world angle from chassis tilt + chassis-relative aim
+      // aimState.angle is already in radians and chassis-relative
+      let worldAngle = (myPlayer.tilt || 0) + aimState.angle;
+
+      // Adjust for facing: left-facing players use π - worldAngle
+      if (facing === -1) {
+        worldAngle = Math.PI - worldAngle;
+      }
 
       // Anchor to the rendered position so the line starts on the sprite.
       const origin =
@@ -273,16 +280,16 @@ export class RendererAdapter {
         { x: myPlayer.x, y: myPlayer.y };
 
       // Full aim line (white)
-      const endX = origin.x + Math.cos(radians) * aimLength;
-      const endY = origin.y - Math.sin(radians) * aimLength;
+      const endX = origin.x + Math.cos(worldAngle) * aimLength;
+      const endY = origin.y - Math.sin(worldAngle) * aimLength;
       this.aimLine.moveTo(origin.x, origin.y);
       this.aimLine.lineTo(endX, endY);
       this.aimLine.stroke({ width: 3, color: 0xffffff });
 
       // Power line (green, shorter)
       const powerPercent = (aimState.power / 100) * aimLength;
-      const powerEndX = origin.x + Math.cos(radians) * powerPercent;
-      const powerEndY = origin.y - Math.sin(radians) * powerPercent;
+      const powerEndX = origin.x + Math.cos(worldAngle) * powerPercent;
+      const powerEndY = origin.y - Math.sin(worldAngle) * powerPercent;
       this.aimLine.moveTo(origin.x, origin.y);
       this.aimLine.lineTo(powerEndX, powerEndY);
       this.aimLine.stroke({ width: 5, color: 0x00ff00 });
