@@ -25,6 +25,16 @@ describe('clampAimDeg', () => {
     expect(clampAimDeg(-20)).toBe(-20);
   });
 
+  it('is idempotent, so a pre-clamped client and the server agree exactly', () => {
+    // The client clamps on every keypress and draws its aim line from the
+    // result; the server clamps the value it receives and fires from THAT.
+    // The two agree only if clamping a clamped value is a no-op, so the aim
+    // line pointing somewhere the shot does not go reduces to this property.
+    for (const deg of [-999, -21, -20, 0, 45, 89.9, 90, 91, 999]) {
+      expect(clampAimDeg(clampAimDeg(deg))).toBe(clampAimDeg(deg));
+    }
+  });
+
   it('resolves a non-finite angle to the middle of the range rather than NaN', () => {
     expect(clampAimDeg(NaN)).toBe(0);
     expect(clampAimDeg(Infinity)).toBe(0);

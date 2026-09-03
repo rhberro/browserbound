@@ -9,13 +9,26 @@
  * - Movement and fire actions
  */
 
+import { clampAimDeg } from '@browserbond/shared';
 import type { GameState } from '../gameState';
+
+/** Degrees of aim per keypress or HUD stepper tick. */
+const AIM_STEP_DEG = 1.5;
 
 /** How fast the power gauge fills, in percent per second. */
 const CHARGE_RATE_PER_SECOND = 40;
 
 export interface AimState {
-  angle: number;
+  /**
+   * Chassis-relative aim in DEGREES — the unit the player dials in, the unit
+   * the HUD shows, and the unit the server's aim message expects.
+   *
+   * Named for its unit on purpose. It was called `angle`, and the aim line read
+   * it as radians and added it to a tilt that really was radians; the result
+   * looked plausible near the default aim, which is why it survived. Anything
+   * that needs a direction converts once, at the point of use.
+   */
+  angleDeg: number;
   power: number;
   isCharging: boolean;
 }
@@ -24,7 +37,8 @@ export class InputAdapter {
   private keys: Map<string, boolean> = new Map();
   private isCharging: boolean = false;
   private aimPower: number = 0;
-  private aimAngle: number = 45; // 0 = horizontal, 90 = up
+  /** Chassis-relative aim in degrees; see AimState.angleDeg. */
+  private aimAngleDeg: number = 45;
   private selectedWeapon: number = 1; // 1 = normal, 2 = burst, 3 = shotgun
   private lastMoveUpdate: number = 0;
 
@@ -81,9 +95,9 @@ export class InputAdapter {
       const downPressed = this.keys.get('ArrowDown') || false;
 
       if (upPressed) {
-        this.aimAngle = Math.min(90, this.aimAngle + 1.5);
+        this.aimAngleDeg = clampAimDeg(this.aimAngleDeg + AIM_STEP_DEG);
       } else if (downPressed) {
-        this.aimAngle = Math.max(0, this.aimAngle - 1.5);
+        this.aimAngleDeg = clampAimDeg(this.aimAngleDeg - AIM_STEP_DEG);
       }
     }
   }
@@ -93,7 +107,7 @@ export class InputAdapter {
    */
   getAimState(): AimState {
     return {
-      angle: this.aimAngle,
+      angleDeg: this.aimAngleDeg,
       power: this.aimPower,
       isCharging: this.isCharging,
     };
@@ -142,7 +156,7 @@ export class InputAdapter {
    * Set aim angle directly.
    */
   setAimAngle(angle: number): void {
-    this.aimAngle = Math.max(0, Math.min(90, angle));
+    this.aimAngleDeg = clampAimDeg(angle);
   }
 
   /**
@@ -161,14 +175,14 @@ export class InputAdapter {
    * Increment aim angle (called by HUD button).
    */
   angleUp(): void {
-    this.aimAngle = Math.min(90, this.aimAngle + 1.5);
+    this.aimAngleDeg = clampAimDeg(this.aimAngleDeg + AIM_STEP_DEG);
   }
 
   /**
    * Decrement aim angle (called by HUD button).
    */
   angleDown(): void {
-    this.aimAngle = Math.max(0, this.aimAngle - 1.5);
+    this.aimAngleDeg = clampAimDeg(this.aimAngleDeg - AIM_STEP_DEG);
   }
 
   /**

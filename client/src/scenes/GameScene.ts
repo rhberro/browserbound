@@ -10,6 +10,9 @@ export class GameScene {
   private app: PIXI.Application;
   private gameState: GameState;
   private container: PIXI.Container;
+  /** Last aim angle sent to the server; null forces a send on the first frame. */
+  private lastSentAimDeg: number | null = null;
+  private wasMyTurn = false;
 
   // Adapters
   private inputAdapter: InputAdapter;
@@ -64,16 +67,29 @@ export class GameScene {
     // Update projectile graphics
     this.rendererAdapter.updateProjectiles(this.gameState);
 
+    // A new turn forces a resend even if the dialled-in angle has not moved,
+    // so the server's stored aim can never sit at a stale value while the HUD
+    // and the aim line show a different one.
+    const myTurn = this.gameState.isMyTurn();
+    if (myTurn !== this.wasMyTurn) {
+      this.wasMyTurn = myTurn;
+      this.lastSentAimDeg = null;
+    }
+
     // Handle server communication
-    if (this.gameState.isMyTurn()) {
+    if (myTurn) {
       // Send movement input to server
       if (this.inputAdapter.shouldSendMovement()) {
         const movement = this.inputAdapter.getMovement();
         this.gameState.sendMovement({ left: movement.left, right: movement.right, jump: false });
       }
 
-      // Send aim angle to server
-      this.gameState.sendAimAngle(aimState.angle);
+      // Only when it actually moves. This ran every frame, sending 60
+      // identical messages a second for a value the player changes in steps.
+      if (aimState.angleDeg !== this.lastSentAimDeg) {
+        this.lastSentAimDeg = aimState.angleDeg;
+        this.gameState.sendAimAngle(aimState.angleDeg);
+      }
 
       // Check if player fired
       if (this.inputAdapter.shouldFire()) {
@@ -86,8 +102,10 @@ export class GameScene {
     const aimState = this.inputAdapter.getAimState();
     const myPlayer = this.getMyPlayer();
 
-    // Render aim line while charging
-    this.rendererAdapter.renderAimLine(myPlayer, aimState);
+    // The aim line is the only world-frame feedback the player gets (ADR
+    // 0003), so it is drawn for the whole of your turn — not just while the
+    // shot is charging. Nobody else's aim is your business.
+    this.rendererAdapter.renderAimLine(this.gameState.isMyTurn() ? myPlayer : null, aimState);
 
     // Render explosion animation
     this.rendererAdapter.renderExplosion(this.gameState.collision);

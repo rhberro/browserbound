@@ -52,7 +52,7 @@ let chargingPower = 0;
 
 function commitLastShot(aim: AimState): void {
   if (aim.isCharging) {
-    chargingAngle = aim.angle;
+    chargingAngle = aim.angleDeg;
     chargingPower = aim.power;
   } else if (wasCharging) {
     lastAngle.value = chargingAngle;
@@ -71,7 +71,7 @@ function commitLastShot(aim: AimState): void {
 export function syncHudSignals(gameState: GameState, inputAdapter: InputAdapter): void {
   const aim = inputAdapter.getAimState();
 
-  angle.value = aim.angle;
+  angle.value = aim.angleDeg;
   power.value = aim.power;
   isCharging.value = aim.isCharging;
   selectedWeapon.value = inputAdapter.getSelectedWeapon();

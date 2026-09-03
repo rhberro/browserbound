@@ -585,7 +585,10 @@ export class GameRoom extends Room<RoomState> {
     const player = this.state.players.get(playerId);
     if (player) {
       player.movementBudget = MOVE_BUDGET;
-      player.aimAngle = 0; // Reset aim angle at the start of each turn
+      // Aim is NOT reset. ADR 0003 makes the chassis-relative measurement the
+      // thing that stays put, and zeroing it here put the server at 0 while
+      // the client's HUD and aim line still read whatever the player had
+      // dialled in — a silent disagreement about where the shot goes.
     }
     this.state.turnEndsAt = Date.now() + TURN_TIME_MS;
     this.walkCarry.set(playerId, 0);

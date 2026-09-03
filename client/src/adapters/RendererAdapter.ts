@@ -10,7 +10,7 @@
  */
 
 import * as PIXI from 'pixi.js';
-import { TerrainOp, PlayerView } from '@browserbond/shared';
+import { TerrainOp, PlayerView, worldFiringAngle, degToRad } from '@browserbond/shared';
 import type { GameState } from '../gameState';
 import { TerrainSurface } from '../rendering/TerrainSurface';
 import { PlayerMotion } from '../rendering/PlayerMotion';
@@ -185,11 +185,7 @@ export class RendererAdapter {
       }
 
       angleInd.clear();
-      const facing = player.facing || 1;
-      const isMyTurn = playerId === gameState.getRoomSessionId();
-      const angle = isMyTurn && aimState ? aimState.angle : 45;
-      const relativeAngle = facing === 1 ? angle : 180 - angle;
-      const radians = (relativeAngle * Math.PI) / 180;
+      const radians = this.aimDirection(playerId, player, aimState);
 
       // Anchor to the rendered (interpolated) position so the arrow tracks the
       // sprite instead of the raw server position it is smoothing toward.
@@ -265,26 +261,44 @@ export class RendererAdapter {
   }
 
   /**
-   * Render aim line (while charging).
+   * The world direction a character's shot will leave in, in the y-up frame.
+   *
+   * ONE path for both aim visuals, through the same shared transform the
+   * server fires with, so the line, the arrow and the projectile cannot
+   * disagree. The local player's own aim comes from local input rather than
+   * from synchronized state — the clamp is now shared, so it reaches the same
+   * answer a round-trip earlier.
+   */
+  private aimDirection(playerId: string, player: PlayerView, aimState?: AimState): number {
+    const isLocal = playerId === this.localPlayerId;
+    const aimAngle =
+      isLocal && aimState ? degToRad(aimState.angleDeg) : player.aimAngle;
+    return worldFiringAngle({ tilt: player.tilt, aimAngle, facing: player.facing || 1 });
+  }
+
+  /**
+   * Render the aim line.
+   *
+   * Drawn throughout aiming, not only while the shot is charging. ADR 0003
+   * records that the aim line is the sole world-frame feedback in the game —
+   * the HUD number is chassis-relative and cannot substitute — so hiding it
+   * during the aiming phase leaves the player blind for exactly the part of
+   * the flow where they are choosing a direction.
    */
   renderAimLine(myPlayer: PlayerView | null, aimState: AimState): void {
-    if (aimState.isCharging && myPlayer) {
-      if (this.aimLine) {
-        this.container.removeChild(this.aimLine);
+    if (myPlayer && this.localPlayerId) {
+      // Reused, not reallocated. The line is now drawn on every frame of
+      // aiming rather than only while charging, so allocating a fresh
+      // Graphics per frame here would leak in earnest. #22 does the same for
+      // the rest of this class.
+      if (!this.aimLine) {
+        this.aimLine = new PIXI.Graphics();
+        this.container.addChild(this.aimLine);
       }
+      this.aimLine.clear();
 
-      this.aimLine = new PIXI.Graphics();
       const aimLength = 100;
-      const facing = myPlayer.facing || 1;
-
-      // Calculate world angle from chassis tilt + chassis-relative aim
-      // aimState.angle is already in radians and chassis-relative
-      let worldAngle = (myPlayer.tilt || 0) + aimState.angle;
-
-      // Adjust for facing: left-facing players use π - worldAngle
-      if (facing === -1) {
-        worldAngle = Math.PI - worldAngle;
-      }
+      const worldAngle = this.aimDirection(this.localPlayerId, myPlayer, aimState);
 
       // Anchor to the rendered position so the line starts on the sprite.
       const origin =
@@ -305,10 +319,9 @@ export class RendererAdapter {
       this.aimLine.moveTo(origin.x, origin.y);
       this.aimLine.lineTo(powerEndX, powerEndY);
       this.aimLine.stroke({ width: 5, color: 0x00ff00 });
-
-      this.container.addChild(this.aimLine);
     } else if (this.aimLine) {
       this.container.removeChild(this.aimLine);
+      this.aimLine.destroy();
       this.aimLine = null;
     }
   }
