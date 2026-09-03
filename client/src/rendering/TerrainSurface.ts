@@ -11,12 +11,12 @@
  * Cost is O(1) per crater — one small render pass into an existing texture —
  * instead of replaying the whole op log as vector geometry on every explosion.
  *
- * Scorch is baked straight into the terrain texture: the disc is multiplied in
- * (darkening the terrain that survives) and then the crater is erased out of
- * it, leaving a darkened ring that hugs the crater. The ring lands on the
- * terrain that was there; where a disc crosses the terrain/sky boundary it can
- * darken a sliver of sky, which is a known, accepted trade-off of doing this
- * with a stock blend rather than a mask.
+ * Scorch is baked straight into the terrain texture with a CUSTOM blend mode
+ * (SCORCH_BLEND below): the disc multiplies the RGB of the terrain that
+ * survives while preserving destination alpha, so a burn cannot touch pixels
+ * that are not solid. The stock `multiply` blend cannot do this — it drove
+ * every transparent texel the disc crossed (sky, a previous crater's hollow)
+ * to opaque black, the ring artifact behind #40/#42.
  *
  * Swapping the placeholder fill for an authored map is a one-call change:
  * call `loadMapImage(mapId)` instead of letting the `rect` ops paint the
@@ -32,19 +32,73 @@ export const TERRAIN_COLOR = 0x8b7355;
 
 /**
  * Gray whose channel value equals SCORCH_BRIGHTNESS, used for the baked scorch.
- * The multiply blend scales a pixel's colour toward this fraction; at 0.4 it
- * darkens a single impact to 40% and accumulates (a second overlapping impact
- * to 0.16), which is the intended burn.
+ * Drawn with the SCORCH_BLEND below, an opaque disc of this color scales a
+ * pixel's RGB toward that fraction; at 0.4 it darkens a single impact to 40%
+ * and accumulates (a second overlapping impact to 0.16), which is the intended
+ * burn.
  */
 const SCORCH_TINT = (() => {
   const c = Math.round(SCORCH_BRIGHTNESS * 255);
   return (c << 16) | (c << 8) | c;
 })();
 
+/**
+ * Blend mode id for the scorch bake: `multiply`'s RGB blend with destination
+ * alpha preserved.
+ *
+ * Pixi's stock `multiply` maps to `blendFuncSeparate(DST_COLOR,
+ * ONE_MINUS_SRC_ALPHA, ONE, ONE_MINUS_SRC_ALPHA)`: RGB scales by the disc's
+ * colour, but ALPHA comes out as `src.a + dst.a*(1-src.a)` — 1 wherever the
+ * disc is opaque, whatever was there before. Baking a scorch disc over
+ * transparent texels (sky, a previous crater's hollow) therefore paints
+ * opaque black; multiplied over the frame it reads as black rings around
+ * craters (#40/#42).
+ *
+ * This mode drops the alpha channel from the multiply: `blendFuncSeparate(
+ * DST_COLOR, ONE_MINUS_SRC_ALPHA, ZERO, ONE)` — RGB darkens exactly like
+ * `multiply`, alpha is the destination's own. Where the terrain is
+ * transparent the disc multiplies (0,0,0) and alpha stays 0: the clip to
+ * terrain is inherent in the blend math, with no mask and no second texture.
+ */
+const SCORCH_BLEND = 'scorch-multiply';
+
+/**
+ * Register the SCORCH_BLEND blend mode with Pixi's WebGL state system.
+ *
+ * Pixi has no built-in blend for "multiply RGB, keep destination alpha", and
+ * there is no public API for adding one, so this writes the same map the
+ * state system reads at draw time. That map is REBUILT whenever the GL
+ * context changes (context restore), so callers must re-register before each
+ * scorch pass rather than once at startup — if the key is missing, Pixi
+ * draws with 'normal' and the burn becomes flat grey discs.
+ *
+ * Returns whether the registration took effect. WebGL only: the WebGPU
+ * renderer is not used by this app, and its blend state lives elsewhere.
+ */
+function registerScorchBlend(renderer: PIXI.Renderer): boolean {
+  if (!(renderer instanceof PIXI.WebGLRenderer)) return false;
+  const blendModesMap = (renderer.state as unknown as { blendModesMap?: Record<string, unknown> })
+    .blendModesMap;
+  if (!blendModesMap) return false;
+  blendModesMap[SCORCH_BLEND] = [
+    renderer.gl.DST_COLOR,
+    renderer.gl.ONE_MINUS_SRC_ALPHA,
+    renderer.gl.ZERO,
+    renderer.gl.ONE,
+  ];
+  return true;
+}
+
 export class TerrainSurface {
   private renderer: PIXI.Renderer;
   private texture: PIXI.RenderTexture;
   private sprite: PIXI.Sprite;
+
+  /**
+   * The blend mode the scorch pass paints with: the custom `SCORCH_BLEND`
+   * when it is registered on this renderer, the stock `multiply` otherwise.
+   */
+  private scorchBlend: PIXI.BLEND_MODES = 'multiply';
 
   /**
    * Scratch graphics reused for every paint pass, plus the wrapper actually
@@ -75,6 +129,7 @@ export class TerrainSurface {
 
   constructor(renderer: PIXI.Renderer) {
     this.renderer = renderer;
+    this.ensureScorchBlend();
 
     // 2000x1200 RGBA = ~9.6MB of GPU memory, well inside any WebGL budget.
     // No antialias: an MSAA target would have to resolve on every pass, and we
@@ -113,6 +168,21 @@ export class TerrainSurface {
   /** The display object to place in the scene where terrain belongs. */
   get view(): PIXI.Container {
     return this.sprite;
+  }
+
+  /**
+   * (Re-)register the scorch blend and adopt it when it takes effect.
+   *
+   * Idempotent and cheap — a map write — so it runs in the constructor and
+   * again before every scorch pass (the map is rebuilt on GL context
+   * changes). When the renderer cannot host the custom blend (not WebGL), the
+   * scorch pass keeps the stock `multiply`: the old black rings rather than
+   * flat discs, and WebGPU is not used by this app anyway.
+   */
+  private ensureScorchBlend(): void {
+    if (registerScorchBlend(this.renderer)) {
+      this.scorchBlend = SCORCH_BLEND as PIXI.BLEND_MODES;
+    }
   }
 
   /** Queue a terrain op. Painted on the next `flush()`. */
@@ -165,8 +235,10 @@ export class TerrainSurface {
     } else {
       // Scorch pass: explosions multiply in a disc a little wider than the
       // crater they are about to carve, darkening the terrain that will
-      // survive. The crater is erased out of it below, so what remains is a
-      // darkened ring hugging the crater.
+      // survive. The blend preserves destination alpha, so the disc only
+      // touches texels that are solid terrain — it cannot punch through a
+      // previous crater's hollow or the sky. The crater is erased out of the
+      // disc below, so what remains is a darkened ring hugging the crater.
       let hasScorch = false;
       g.clear();
       for (const op of ops) {
@@ -177,8 +249,12 @@ export class TerrainSurface {
         hasScorch = true;
       }
       if (hasScorch) {
+        // Re-registered per pass: Pixi rebuilds its blend-mode map when the GL
+        // context changes, and a missing key would draw this pass with the
+        // 'normal' blend — flat grey discs.
+        this.ensureScorchBlend();
         g.fill({ color: SCORCH_TINT, alpha: 1 });
-        g.blendMode = 'multiply';
+        g.blendMode = this.scorchBlend;
         this.renderer.render({
           container: this.paintRoot,
           target: this.texture,

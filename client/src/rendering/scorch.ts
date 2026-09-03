@@ -22,10 +22,10 @@
  *     match.
  *
  * This module holds the GEOMETRY — which pixels darken and by how much.
- * `TerrainSurface` paints it into a separate layer that is composited over the
- * terrain with a multiply blend and clipped by the terrain's alpha, so a burn
- * only shows where terrain actually is. The disc covers the crater as well as
- * the band; the crater is erased out of the terrain underneath it.
+ * `TerrainSurface` bakes it into the terrain texture with a blend that
+ * multiplies RGB but preserves destination alpha, so a burn only shows where
+ * terrain actually is. The disc covers the crater as well as the band; the
+ * crater is erased out of the terrain underneath it.
  */
 
 import { TerrainOp } from '@browserbond/shared';
