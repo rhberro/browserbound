@@ -11,14 +11,12 @@
  * Cost is O(1) per crater — one small render pass into an existing texture —
  * instead of replaying the whole op log as vector geometry on every explosion.
  *
- * SCORCH IS A SEPARATE MASKED LAYER. Scorch discs are accumulated in a second,
- * full-map `scorchTexture` and composited over the terrain at DISPLAY time with
- * a `multiply` blend, clipped by the terrain sprite's alpha. That clipping is
- * what makes a scorch a burn rather than a floating circle: it only darkens
- * pixels that are actually terrain, so a disc over the sky or over an earlier
- * crater's hollow interior shows nothing. Baking it into the terrain texture
- * instead (a multiply of the whole disc) darkens the sky too, which is the bug
- * this layering exists to avoid.
+ * Scorch is baked straight into the terrain texture: the disc is multiplied in
+ * (darkening the terrain that survives) and then the crater is erased out of
+ * it, leaving a darkened ring that hugs the crater. The ring lands on the
+ * terrain that was there; where a disc crosses the terrain/sky boundary it can
+ * darken a sliver of sky, which is a known, accepted trade-off of doing this
+ * with a stock blend rather than a mask.
  *
  * Swapping the placeholder fill for an authored map is a one-call change:
  * call `loadMapImage(mapId)` instead of letting the `rect` ops paint the
@@ -33,36 +31,20 @@ import { scorchDiscFor, SCORCH_BRIGHTNESS } from './scorch';
 export const TERRAIN_COLOR = 0x8b7355;
 
 /**
- * Alpha of one scorch disc as it sits in the scorch texture. The display
- * composite multiplies the terrain by `(1 - alpha)`, so drawing a disc at
- * `1 - SCORCH_BRIGHTNESS` applies the SCORCH_BRIGHTNESS darkening per impact.
- * Because they are accumulated with a normal blend, repeated impacts stack:
- * alpha goes 0.6 -> 0.84 -> ..., which multiplies terrain brightness by
- * 0.4 -> 0.16 -> ... — exactly the accumulation the model intends.
+ * Gray whose channel value equals SCORCH_BRIGHTNESS, used for the baked scorch.
+ * The multiply blend scales a pixel's colour toward this fraction; at 0.4 it
+ * darkens a single impact to 40% and accumulates (a second overlapping impact
+ * to 0.16), which is the intended burn.
  */
-const SCORCH_ALPHA = 1 - SCORCH_BRIGHTNESS;
-
-/**
- * Pure black, deliberately. The composite multiplies the terrain by the disc's
- * colour; only RGB 0 keeps the darkening entirely in the alpha channel, so a
- * disc darkens by exactly `1 - alpha` and never tints the terrain.
- */
-const SCORCH_COLOR = 0x000000;
+const SCORCH_TINT = (() => {
+  const c = Math.round(SCORCH_BRIGHTNESS * 255);
+  return (c << 16) | (c << 8) | c;
+})();
 
 export class TerrainSurface {
   private renderer: PIXI.Renderer;
   private texture: PIXI.RenderTexture;
-  private scorchTexture: PIXI.RenderTexture;
   private sprite: PIXI.Sprite;
-  private scorchSprite: PIXI.Sprite;
-  /**
-   * The mask clipping the scorch layer to the terrain's alpha. A sprite of the
-   * terrain texture. Kept OUT of the display tree and used only as a mask,
-   * because a mask object is excluded from its parent's render in Pixi 8.
-   */
-  private maskSprite: PIXI.Sprite;
-  /** The display root: terrain sprite, then the scorch layer over it. */
-  private root: PIXI.Container;
 
   /**
    * Scratch graphics reused for every paint pass, plus the wrapper actually
@@ -94,67 +76,43 @@ export class TerrainSurface {
   constructor(renderer: PIXI.Renderer) {
     this.renderer = renderer;
 
-    // 2000x1200 RGBA = ~9.6MB of GPU memory each, well inside any WebGL budget.
+    // 2000x1200 RGBA = ~9.6MB of GPU memory, well inside any WebGL budget.
     // No antialias: an MSAA target would have to resolve on every pass, and we
-    // accumulate into these textures rather than redrawing them.
+    // accumulate into this texture rather than redrawing it.
     this.texture = PIXI.RenderTexture.create({
       width: MAP_WIDTH,
       height: MAP_HEIGHT,
       antialias: false,
       resolution: 1,
     });
-    this.scorchTexture = PIXI.RenderTexture.create({
-      width: MAP_WIDTH,
-      height: MAP_HEIGHT,
-      antialias: false,
-      resolution: 1,
-    });
+    // Nearest sampling. The camera eases toward a target and almost always
+    // lands on a fractional position, and with the default linear filter the
+    // high-contrast terrain/sky boundary is interpolated against the sky — a
+    // soft, shimmering edge that reads as the terrain "going invisible" as the
+    // camera moves. Nearest snaps to a texel, keeping the edge crisp.
+    this.texture.source.scaleMode = 'nearest';
 
-    // Freshly created render textures have undefined contents — clear each once
-    // to fully transparent so erasing and scorching are meaningful from the
-    // first frame.
+    // A freshly created render texture has undefined contents — clear it once
+    // to fully transparent so erasing is meaningful from the first frame.
     this.scratch = new PIXI.Graphics();
     this.paintRoot = new PIXI.Container();
     this.paintRoot.addChild(this.scratch);
 
-    for (const target of [this.texture, this.scorchTexture]) {
-      this.renderer.render({
-        container: this.paintRoot,
-        target,
-        clear: true,
-        clearColor: [0, 0, 0, 0],
-      });
-    }
+    this.renderer.render({
+      container: this.paintRoot,
+      target: this.texture,
+      clear: true,
+      clearColor: [0, 0, 0, 0],
+    });
 
     this.sprite = new PIXI.Sprite(this.texture);
     this.sprite.x = 0;
     this.sprite.y = 0;
-
-    // The scorch layer sits over the terrain, multiplied in. It has NO display
-    // mask: the clip is baked into the scorch texture at render time (see
-    // paintRun), so the per-frame composite is a plain multiply with nothing to
-    // re-process — a display mask on a full-map sprite is what flickered the
-    // terrain edges.
-    this.scorchSprite = new PIXI.Sprite(this.scorchTexture);
-    this.scorchSprite.x = 0;
-    this.scorchSprite.y = 0;
-    this.scorchSprite.blendMode = 'multiply';
-
-    // The terrain alpha, used only as a render-time mask while drawing scorch
-    // discs into the scorch texture. Not a scene child: it must not be rendered
-    // as a duplicate terrain, and masking the scratch (not the sprite) is what
-    // clips the scorch to terrain without a per-frame composite.
-    this.maskSprite = new PIXI.Sprite(this.texture);
-    this.maskSprite.x = 0;
-    this.maskSprite.y = 0;
-
-    this.root = new PIXI.Container();
-    this.root.addChild(this.sprite, this.scorchSprite);
   }
 
   /** The display object to place in the scene where terrain belongs. */
   get view(): PIXI.Container {
-    return this.root;
+    return this.sprite;
   }
 
   /** Queue a terrain op. Painted on the next `flush()`. */
@@ -163,12 +121,11 @@ export class TerrainSurface {
   }
 
   /**
-   * Paint every queued op.
+   * Paint every queued op into the terrain texture.
    *
    * Ops are grouped into runs of the same blend kind so a replay of the op log
    * costs a handful of render passes rather than one per op, while preserving
    * order between adds and erases (a rect drawn after a crater must refill it).
-   * Explosions also write their scorch discs into the scorch layer.
    */
   flush(): void {
     if (!this.mapReady || this.pending.length === 0) return;
@@ -206,10 +163,10 @@ export class TerrainSurface {
         clear: false,
       });
     } else {
-      // Scorch discs accumulate in the separate scorch layer, not the terrain.
-      // They only darken at display time where the terrain is opaque (the mask
-      // clips them), so a disc over the sky or an earlier crater shows nothing —
-      // which is the difference between a burn and a floating circle.
+      // Scorch pass: explosions multiply in a disc a little wider than the
+      // crater they are about to carve, darkening the terrain that will
+      // survive. The crater is erased out of it below, so what remains is a
+      // darkened ring hugging the crater.
       let hasScorch = false;
       g.clear();
       for (const op of ops) {
@@ -220,26 +177,18 @@ export class TerrainSurface {
         hasScorch = true;
       }
       if (hasScorch) {
-        g.fill({ color: SCORCH_COLOR, alpha: SCORCH_ALPHA });
-        g.blendMode = 'normal';
-        // Clip the scorch discs to the terrain's CURRENT alpha, so a burn only
-        // lands on existing terrain. The mask reads the terrain texture; the
-        // target is the scorch texture — different textures, so there is no
-        // read-write feedback. Baking the clip in is why the scorch sprite needs
-        // no display mask (and doesn't flicker the terrain edges).
-        this.scratch.mask = this.maskSprite;
+        g.fill({ color: SCORCH_TINT, alpha: 1 });
+        g.blendMode = 'multiply';
         this.renderer.render({
           container: this.paintRoot,
-          target: this.scorchTexture,
+          target: this.texture,
           clear: false,
         });
-        this.scratch.mask = null;
       }
 
-      // Erase pass into the terrain texture: the crater itself plus any
-      // collapsed lips. 'erase' maps to blendFunc(ZERO, ONE_MINUS_SRC_ALPHA):
-      // the destination is multiplied by (1 - srcAlpha), so an opaque disc
-      // drives colour AND alpha to zero.
+      // Erase pass: the crater itself plus any collapsed lips. 'erase' maps to
+      // blendFunc(ZERO, ONE_MINUS_SRC_ALPHA): the destination is multiplied by
+      // (1 - srcAlpha), so an opaque disc drives colour AND alpha to zero.
       g.clear();
       for (const op of ops) {
         // Both erasing kinds share this pass: 'explosion' carves a crater,
@@ -284,15 +233,6 @@ export class TerrainSurface {
         clearColor: [0, 0, 0, 0],
       });
 
-      // A fresh map is a fresh match: the scorch layer must not carry the last
-      // match's burns onto the new battlefield.
-      this.renderer.render({
-        container: this.paintRoot,
-        target: this.scorchTexture,
-        clear: true,
-        clearColor: [0, 0, 0, 0],
-      });
-
       root.destroy({ children: true });
     } finally {
       // Released even on failure: a map that will not load must not wedge the
@@ -303,10 +243,7 @@ export class TerrainSurface {
 
   destroy(): void {
     this.sprite.destroy();
-    this.scorchSprite.destroy();
-    this.maskSprite.destroy();
     this.paintRoot.destroy({ children: true });
     this.texture.destroy(true);
-    this.scorchTexture.destroy(true);
   }
 }
