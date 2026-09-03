@@ -11,6 +11,7 @@ import {
 import { PhysicsAdapter, Wind } from '@browserbond/shared/src/adapters/PhysicsAdapter';
 import { MessageValidationAdapter } from '@browserbond/shared/src/adapters/MessageValidationAdapter';
 import { WindManager } from '../adapters/WindManager';
+import { shouldAdvanceTurn } from './turnLoop';
 import { loadMap, loadRandomMap, LoadedMap } from '../adapters/MapLoader';
 import {
   getWeapon,
@@ -326,6 +327,11 @@ export class GameRoom extends Room<RoomState> {
         const weapon = getWeapon(proj.weaponType);
         const range = splashRange(weapon.splashRadius);
         const affectedPlayers: string[] = [];
+        // killPlayer deletes from this.state.players, which is the collection
+        // this loop is walking. Collect the casualties and resolve them after
+        // the walk, so a blast that kills two characters cannot skip the
+        // second one by mutating the map mid-iteration.
+        const killed: string[] = [];
 
         // On any collision, damage and knockback all characters within splash range
         for (const [playerId, player] of this.state.players) {
@@ -355,48 +361,31 @@ export class GameRoom extends Room<RoomState> {
           }
 
           if (player.health <= 0) {
-            this.killPlayer(playerId, 'destroyed');
+            killed.push(playerId);
           }
         }
 
         // Always destroy terrain at impact point, regardless of collision type
         this.destroyTerrain(collision.x, collision.y, weapon.craterRadius);
 
-        // Broadcast collision details
-        if (collision.type === 'player') {
-          this.broadcast('collision', {
-            type: 'player',
-            projectileId: proj.id,
-            targetId: collision.playerId,
-            x: collision.x,
-            y: collision.y,
-            affectedPlayers: affectedPlayers.map(id => {
-              const p = this.state.players.get(id);
-              return { playerId: id, health: p?.health ?? 0 };
-            }),
-          });
-        } else if (collision.type === 'terrain') {
-          this.broadcast('collision', {
-            type: 'terrain',
-            projectileId: proj.id,
-            x: collision.x,
-            y: collision.y,
-            affectedPlayers: affectedPlayers.map(id => {
-              const p = this.state.players.get(id);
-              return { playerId: id, health: p?.health ?? 0 };
-            }),
-          });
-        } else if (collision.type === 'miss') {
-          this.broadcast('collision', {
-            type: 'miss',
-            projectileId: proj.id,
-            x: collision.x,
-            y: collision.y,
-            affectedPlayers: affectedPlayers.map(id => {
-              const p = this.state.players.get(id);
-              return { playerId: id, health: p?.health ?? 0 };
-            }),
-          });
+        // Health is read BEFORE the casualties are resolved below, so a killed
+        // character is reported at the health that killed it rather than
+        // vanishing from the payload.
+        this.broadcast('collision', {
+          type: collision.type,
+          projectileId: proj.id,
+          ...(collision.type === 'player' ? { targetId: collision.playerId } : {}),
+          x: collision.x,
+          y: collision.y,
+          affectedPlayers: affectedPlayers.map((id) => {
+            const p = this.state.players.get(id);
+            return { playerId: id, health: p?.health ?? 0 };
+          }),
+        });
+
+        // Safe now that the walk is finished.
+        for (const playerId of killed) {
+          this.killPlayer(playerId, 'destroyed');
         }
 
         projectilesToRemove.push(proj.id);
@@ -406,14 +395,22 @@ export class GameRoom extends Room<RoomState> {
     // Remove projectiles that collided
     this.projectiles = this.projectiles.filter(p => !projectilesToRemove.includes(p.id));
 
-    // If all projectiles are gone, change turn
-    if (this.projectiles.length === 0 && projectilesToRemove.length > 0) {
+    // Pass the turn only once nothing is airborne AND nothing is still staged
+    // to fire. See shouldAdvanceTurn for why the staged term matters.
+    if (
+      shouldAdvanceTurn({
+        active: this.projectiles.length,
+        pending: this.pendingProjectiles.length,
+        resolvedThisFrame: projectilesToRemove.length,
+      })
+    ) {
       this.advanceTurn();
     }
 
-    // Turn timer: a player who never fires must not stall the game. Separate
-    // from the inactivity sweep above, which DELETES a player — a timed-out
-    // turn just passes.
+    // Turn timer: a player who never fires must not stall the game. A timed-out
+    // turn just passes; it never removes anyone. Losing a character to silence
+    // is what the reconnection window in onLeave is for, and only a genuinely
+    // dropped connection triggers it.
     if (
       this.state.currentPlayerId &&
       this.projectiles.length === 0 &&
