@@ -84,22 +84,22 @@ export function LoginSignup({ onSuccess }: LoginSignupProps) {
   };
 
   return (
-    <div class="min-h-screen bg-gradient-to-b from-slate-900 to-slate-800 flex items-center justify-center p-4">
-      <div class="w-full max-w-md">
-        <div class="bg-slate-800 rounded-lg shadow-xl p-8 border border-slate-700">
+    <div class="min-h-screen bg-gradient-to-b from-slate-900 to-slate-800 flex items-center justify-center p-4 pointer-events-auto">
+      <div class="w-full max-w-md pointer-events-auto">
+        <div class="bg-slate-800 rounded-lg shadow-xl p-8 border border-slate-700 pointer-events-auto">
           <h1 class="text-3xl font-bold text-white mb-2 text-center">BrowserBound</h1>
           <h2 class="text-lg font-semibold text-slate-300 mb-6 text-center">
             {isSignUp ? 'Create Account' : 'Sign In'}
           </h2>
 
-          <form onSubmit={handleSubmit} class="space-y-4">
-            <div>
-              <label class="block text-sm font-medium text-slate-300 mb-1">Email</label>
+          <form onSubmit={handleSubmit} class="space-y-4 pointer-events-auto">
+            <div class="pointer-events-auto">
+              <label class="block text-sm font-medium text-slate-300 mb-1 pointer-events-none">Email</label>
               <input
                 type="email"
                 value={email}
                 onChange={(e) => setEmail((e.target as HTMLInputElement).value)}
-                class="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded text-white placeholder-slate-400 focus:outline-none focus:border-blue-500"
+                class="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded text-white placeholder-slate-400 focus:outline-none focus:border-blue-500 pointer-events-auto"
                 placeholder="you@example.com"
                 required
                 disabled={loading}
@@ -107,26 +107,26 @@ export function LoginSignup({ onSuccess }: LoginSignupProps) {
             </div>
 
             {isSignUp && (
-              <div>
-                <label class="block text-sm font-medium text-slate-300 mb-1">Display Name</label>
+              <div class="pointer-events-auto">
+                <label class="block text-sm font-medium text-slate-300 mb-1 pointer-events-none">Display Name</label>
                 <input
                   type="text"
                   value={displayName}
                   onChange={(e) => setDisplayName((e.target as HTMLInputElement).value)}
-                  class="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded text-white placeholder-slate-400 focus:outline-none focus:border-blue-500"
+                  class="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded text-white placeholder-slate-400 focus:outline-none focus:border-blue-500 pointer-events-auto"
                   placeholder="Your display name"
                   disabled={loading}
                 />
               </div>
             )}
 
-            <div>
-              <label class="block text-sm font-medium text-slate-300 mb-1">Password</label>
+            <div class="pointer-events-auto">
+              <label class="block text-sm font-medium text-slate-300 mb-1 pointer-events-none">Password</label>
               <input
                 type="password"
                 value={password}
                 onChange={(e) => setPassword((e.target as HTMLInputElement).value)}
-                class="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded text-white placeholder-slate-400 focus:outline-none focus:border-blue-500"
+                class="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded text-white placeholder-slate-400 focus:outline-none focus:border-blue-500 pointer-events-auto"
                 placeholder="••••••••"
                 required
                 disabled={loading}
@@ -134,7 +134,7 @@ export function LoginSignup({ onSuccess }: LoginSignupProps) {
             </div>
 
             {error && (
-              <div class="bg-red-500 bg-opacity-20 border border-red-500 rounded p-3 text-red-300 text-sm">
+              <div class="bg-red-500 bg-opacity-20 border border-red-500 rounded p-3 text-red-300 text-sm pointer-events-auto">
                 {error}
               </div>
             )}
@@ -142,14 +142,14 @@ export function LoginSignup({ onSuccess }: LoginSignupProps) {
             <button
               type="submit"
               disabled={loading}
-              class="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-600 disabled:opacity-50 text-white font-semibold py-2 px-4 rounded transition"
+              class="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-600 disabled:opacity-50 text-white font-semibold py-2 px-4 rounded transition pointer-events-auto cursor-pointer"
             >
               {loading ? 'Loading...' : isSignUp ? 'Sign Up' : 'Sign In'}
             </button>
           </form>
 
-          <div class="mt-4 text-center">
-            <p class="text-slate-400 text-sm">
+          <div class="mt-4 text-center pointer-events-auto">
+            <p class="text-slate-400 text-sm pointer-events-none">
               {isSignUp ? 'Already have an account?' : "Don't have an account?"}{' '}
               <button
                 type="button"
@@ -157,7 +157,7 @@ export function LoginSignup({ onSuccess }: LoginSignupProps) {
                   setIsSignUp(!isSignUp);
                   setError('');
                 }}
-                class="text-blue-400 hover:text-blue-300 font-medium"
+                class="text-blue-400 hover:text-blue-300 font-medium pointer-events-auto cursor-pointer"
               >
                 {isSignUp ? 'Sign In' : 'Sign Up'}
               </button>
