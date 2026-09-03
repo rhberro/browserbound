@@ -12,8 +12,12 @@ const STEPPER_CLASS =
 /** Aim angle with press-and-hold steppers and the previous shot's angle. */
 export function AngleControl() {
   const input = useInput();
-  const down = useHoldRepeat(() => input.angleDown());
-  const up = useHoldRepeat(() => input.angleUp());
+  // Aim is the one control a player works constantly and across a wide range,
+  // so it opts into the accelerating repeat: a tap is a single degree, a hold
+  // travels. The server clamps aim to its chassis-relative range regardless of
+  // how fast the steps arrive, so the ramp cannot push it out of bounds.
+  const down = useHoldRepeat(() => input.angleDown(), { accelerate: true });
+  const up = useHoldRepeat(() => input.angleUp(), { accelerate: true });
   const disabled = !isMyTurn.value;
 
   return (
