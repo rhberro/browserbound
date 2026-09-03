@@ -80,6 +80,15 @@ export class GameState {
   private static readonly TOKEN_KEY = 'browserbound:reconnectionToken';
   /** Unsubscribe functions for state callbacks bound to the current room. */
   private stateUnsubscribers: Array<() => void> = [];
+  /**
+   * Per-entity `onChange` unsubscribers, keyed by the entity's id.
+   *
+   * Kept apart from the room-level ones because they have a different
+   * lifetime: a projectile's callback must be released when THAT projectile
+   * resolves, not when the room does. Pushed onto the flat list instead, they
+   * accumulated one entry per shot fired for the life of the session.
+   */
+  private entityUnsubscribers: Map<string, () => void> = new Map();
 
   /** Notified when the connection drops and again when it is restored. */
   public onConnectionChange: ((connected: boolean) => void) | null = null;
@@ -139,10 +148,9 @@ export class GameState {
    * The instances themselves stay plain data, which is why every read below
    * still touches `player.x` directly — only the *subscription* changed.
    *
-   * Every registration returns an unsubscribe function, and they are collected
-   * so a reconnect can drop the old room's listeners. `reconnect` hands back a
-   * NEW Room, and listeners left on the previous one would keep firing against
-   * state nothing updates any more.
+   * Every registration returns an unsubscribe function and all of them are
+   * collected, so teardown can drop them. Room-level ones live for the
+   * session; per-entity ones are released when their entity leaves the map.
    */
   private bindStateListeners(): void {
     if (!this.room?.state) return;
@@ -157,7 +165,8 @@ export class GameState {
     track(
       $(this.room.state).players.onAdd((player: Player, key: string) => {
         this.players.set(key, snapshot(player));
-        track(
+        this.trackEntity(
+          key,
           $(player).onChange(() => {
             this.players.set(key, snapshot(player));
           })
@@ -168,6 +177,7 @@ export class GameState {
     track(
       $(this.room.state).players.onRemove((_player: Player, key: string) => {
         this.players.delete(key);
+        this.releaseEntity(key);
       })
     );
 
@@ -178,7 +188,8 @@ export class GameState {
     track(
       $(this.room.state).projectiles.onAdd((proj: Projectile, key: string) => {
         this.projectiles.set(key, { x: proj.x, y: proj.y });
-        track(
+        this.trackEntity(
+          key,
           $(proj).onChange(() => {
             this.projectiles.set(key, { x: proj.x, y: proj.y });
           })
@@ -189,6 +200,7 @@ export class GameState {
     track(
       $(this.room.state).projectiles.onRemove((_proj: Projectile, key: string) => {
         this.projectiles.delete(key);
+        this.releaseEntity(key);
       })
     );
 
@@ -199,10 +211,24 @@ export class GameState {
     );
   }
 
+  private trackEntity(key: string, off: () => void): void {
+    this.releaseEntity(key);
+    this.entityUnsubscribers.set(key, off);
+  }
+
+  private releaseEntity(key: string): void {
+    const off = this.entityUnsubscribers.get(key);
+    if (!off) return;
+    off();
+    this.entityUnsubscribers.delete(key);
+  }
+
   /** Drop every state callback registered against the current room. */
   private unbindStateListeners(): void {
     for (const off of this.stateUnsubscribers) off();
     this.stateUnsubscribers = [];
+    for (const off of this.entityUnsubscribers.values()) off();
+    this.entityUnsubscribers.clear();
   }
 
   /**
@@ -312,12 +338,6 @@ export class GameState {
       this.onRematchReady?.(data.ready, data.of);
     });
 
-    this.room.onMessage('windChanged', (data) => {
-      if (this.turnState) {
-        this.turnState.windSpeed = data.windSpeed;
-        this.turnState.windDirection = data.windDirection;
-      }
-    });
   }
 
   private updateTurnState() {

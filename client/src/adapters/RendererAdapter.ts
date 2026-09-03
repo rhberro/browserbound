@@ -162,7 +162,10 @@ export class RendererAdapter {
 
     this.terrain.destroy();
     this.container.removeChildren();
-    for (const layer of Object.values(this.layers)) layer.destroy();
+    // `children: true` even though everything above was destroyed explicitly:
+    // Pixi defaults it to false, so the next child added to a layer would
+    // otherwise leak silently the day someone adds one.
+    for (const layer of Object.values(this.layers)) layer.destroy({ children: true });
   }
 
   /**

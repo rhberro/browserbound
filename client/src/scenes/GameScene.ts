@@ -3,7 +3,7 @@ import { GameState } from '../gameState';
 import { InputAdapter } from '../adapters/InputAdapter';
 import { CameraAdapter } from '../adapters/CameraAdapter';
 import { RendererAdapter } from '../adapters/RendererAdapter';
-import { mountHud } from '../ui/mountHud';
+import { mountHud, unmountHud } from '../ui/mountHud';
 import {
   syncHudSignals,
   isConnected,
@@ -122,6 +122,7 @@ export class GameScene {
    * holds a map-sized render texture.
    */
   destroy(): void {
+    unmountHud();
     this.inputAdapter.teardownInput();
     this.rendererAdapter.destroy();
     this.app.stage.removeChild(this.container);

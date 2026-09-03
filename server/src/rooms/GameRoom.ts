@@ -99,6 +99,17 @@ export class GameRoom extends Room {
   private matchStarted: boolean = false;
   /** Sessions that have asked for a rematch since the match ended. */
   private rematchReady: Set<string> = new Set();
+  /**
+   * Sessions inside an open reconnection window.
+   *
+   * Colyseus removes a client from `this.clients` before onDrop, so a dropped
+   * player is invisible to any head count. Without tracking them, a rematch
+   * could start while someone was still on their way back — and they would
+   * return to a match rebuilt without them.
+   */
+  private droppedSessions: Set<string> = new Set();
+  /** A character left the field this frame; re-check the match at frame end. */
+  private matchEndDirty: boolean = false;
   /** Fractional vx accumulation for airborne horizontal stepping. */
   private airborneVxCarry: Map<string, number> = new Map();
   private map!: LoadedMap;
@@ -267,6 +278,18 @@ export class GameRoom extends Room {
    * won. Idempotent, because every removal path calls it and a final exchange
    * can remove two characters in one frame.
    */
+  /** Put a fresh character on the field for a session, at the given spawn slot. */
+  private spawnCharacter(sessionId: string, spawnIndex: number): Player {
+    const player = new Player();
+    player.id = sessionId;
+    const spawn = this.map.spawns[spawnIndex % this.map.spawns.length];
+    player.x = spawn.x;
+    player.y = spawn.y;
+    player.health = 100;
+    this.state.players.set(sessionId, player);
+    return player;
+  }
+
   private checkMatchEnd(): void {
     if (!this.matchStarted || this.state.matchPhase === 'ended') return;
     if (this.state.players.size >= 2) return;
@@ -322,13 +345,7 @@ export class GameRoom extends Room {
     // the last match and had theirs removed.
     this.state.players.clear();
     this.clients.forEach((client, index) => {
-      const player = new Player();
-      player.id = client.sessionId;
-      const spawn = this.map.spawns[index % this.map.spawns.length];
-      player.x = spawn.x;
-      player.y = spawn.y;
-      player.health = 100;
-      this.state.players.set(client.sessionId, player);
+      this.spawnCharacter(client.sessionId, index);
     });
 
     this.matchStarted = this.state.players.size >= 2;
@@ -352,6 +369,9 @@ export class GameRoom extends Room {
    */
   private considerRematch(): void {
     if (this.state.matchPhase !== 'ended') return;
+    // Someone is mid-reconnect. Starting now would rebuild the match without
+    // them and strand them on arrival; their window expiring calls back here.
+    if (this.droppedSessions.size > 0) return;
     if (this.clients.length === 0) return;
     if (this.rematchReady.size < this.clients.length) return;
     this.startRematch();
@@ -535,6 +555,16 @@ export class GameRoom extends Room {
     // snapshot; deleting from the map inside that loop would not be.
     for (const id of projectilesToRemove) {
       this.state.projectiles.delete(id);
+    }
+
+    // Every death this frame has now been applied, so a mutual kill is visible
+    // as one event rather than two sequential ones.
+    if (this.matchEndDirty) {
+      this.matchEndDirty = false;
+      this.checkMatchEnd();
+      // The phase may only now have flipped, and a player who asked for a
+      // rematch before that had their vote ignored as premature.
+      this.considerRematch();
     }
 
     // Pass the turn only once nothing is airborne AND nothing is still staged
@@ -766,10 +796,9 @@ export class GameRoom extends Room {
     this.roundsCompleted = 0;
     this.state.windSpeed = newWind.magnitude * 100;
     this.state.windDirection = newWind.angle;
-    this.broadcast('windChanged', {
-      windSpeed: this.state.windSpeed,
-      windDirection: this.state.windDirection,
-    });
+    // No windChanged broadcast. Wind is synchronized state, so the two writes
+    // above already tell every client; a message repeating them was a second
+    // source of truth that the next state patch immediately overwrote.
   }
 
   /**
@@ -813,10 +842,12 @@ export class GameRoom extends Room {
     this.blockedNotified.delete(playerId);
     this.airborneVxCarry.delete(playerId);
 
-    // Losing a character can end the match, so this is checked before the turn
-    // is handed on — there may be nobody left to hand it to.
-    this.checkMatchEnd();
-    if (this.state.matchPhase === 'ended') return;
+    // NOT checked here. Two characters can die in the same frame — a splash
+    // kill plus an out-of-bounds death, or both crossing the Kill Boundary —
+    // and ending on the first removal would name the second one's killer as
+    // the winner of what is actually a draw. The check runs once at the end of
+    // the frame, when the casualty list is complete.
+    this.matchEndDirty = true;
 
     if (this.state.currentPlayerId !== playerId) return;
 
@@ -880,14 +911,7 @@ export class GameRoom extends Room {
   }
 
   onJoin(client: Client) {
-    const player = new Player();
-    player.id = client.sessionId;
-    const spawn = this.map.spawns[this.state.players.size % this.map.spawns.length];
-    player.x = spawn.x;
-    player.y = spawn.y;
-    player.health = 100;
-
-    this.state.players.set(client.sessionId, player);
+    this.spawnCharacter(client.sessionId, this.state.players.size);
     if (this.state.players.size >= 2) this.matchStarted = true;
 
     // Ensure currentPlayerId always points to a valid player, and that whoever
@@ -899,6 +923,25 @@ export class GameRoom extends Room {
 
     // Send current terrain state to the client
     client.send('terrainSync', { mapId: this.map.id, ops: this.terrainOps });
+  }
+
+  /**
+   * Release everything scoped to this room.
+   *
+   * Colyseus stops the timestep itself, but the room's own maps and buffers
+   * are ours. The terrain mask is MAP_WIDTH * MAP_HEIGHT bytes and is by far
+   * the largest thing a room holds.
+   */
+  onDispose() {
+    this.playerInputs.clear();
+    this.walkCarry.clear();
+    this.blockedNotified.clear();
+    this.airborneVxCarry.clear();
+    this.rematchReady.clear();
+    this.droppedSessions.clear();
+    this.pendingProjectiles = [];
+    this.terrainOps = [];
+    this.terrainBitmap = new Uint8Array(0);
   }
 
   /**
@@ -919,15 +962,38 @@ export class GameRoom extends Room {
     this.playerInputs.delete(client.sessionId);
     player.connected = false;
 
-    // Resolving means they came back and onReconnect has run; rejecting means
-    // the window closed, and then onLeave runs for the permanent departure.
-    await this.allowReconnection(client, RECONNECT_WINDOW_SECONDS);
+    this.droppedSessions.add(client.sessionId);
+
+    try {
+      await this.allowReconnection(client, RECONNECT_WINDOW_SECONDS);
+      // Resolved: they are back, and onReconnect has run.
+    } catch {
+      // Rejection is the NORMAL expiry path, not an error — the window closed
+      // and onLeave will run for the permanent departure. Unhandled, this was
+      // a rejected promise for every player who ever failed to come back.
+    } finally {
+      this.droppedSessions.delete(client.sessionId);
+      // Someone may have been waiting on this player to vote for a rematch.
+      this.considerRematch();
+    }
   }
 
   /** They made it back inside the window. */
   async onReconnect(client: Client) {
     const player = this.state.players.get(client.sessionId);
-    if (player) player.connected = true;
+    if (player) {
+      player.connected = true;
+      return;
+    }
+
+    // No character: either theirs was destroyed, or a rematch rebuilt the
+    // match while they were away. onJoin does not run again for a reconnect,
+    // so without this they would sit in a live match with nothing to play.
+    if (this.state.matchPhase === 'playing') {
+      this.spawnCharacter(client.sessionId, this.state.players.size);
+      if (this.state.players.size >= 2) this.matchStarted = true;
+      if (!this.state.currentPlayerId) this.beginTurn(client.sessionId);
+    }
   }
 
   /**

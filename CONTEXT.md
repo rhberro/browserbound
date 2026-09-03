@@ -11,8 +11,14 @@ BrowserBound is a turn-based multiplayer artillery game. Players aim projectiles
 A **Projectile** is a physical object fired by a player with an initial velocity. It is affected by gravity and wind each frame, moves in a parabolic arc, and collides with terrain or players.
 
 - **Position**: `(x, y)` — current location in world space
-- **Velocity**: `(vx, vy)` — horizontal and vertical speed
-- **Lifetime**: From fire until it hits terrain, goes out of bounds, or hits an opponent
+- **Velocity**: `(vx, vy)` — horizontal and vertical speed. Server-side only: the client
+  interpolates positions rather than predicting motion, so velocity is never synchronized.
+- **Lifetime**: From fire until it hits terrain, goes out of bounds, hits an opponent, or reaches
+  the Projectile Lifetime backstop
+
+Projectiles travel as **synchronized state**, like every other moving thing. Appearing in that state
+is the shot being fired and leaving it is the shot being over. The impact itself stays a message,
+because it is an event rather than continuous state.
 
 ### Wind
 
@@ -66,7 +72,8 @@ Each server frame:
 1. **PhysicsAdapter.updateAllProjectiles(projectiles, wind)** — Advance each projectile position and velocity given current wind
 2. **GameRoom checks collisions** — For each projectile, test if it hit terrain, went out of bounds, or hit a player
 3. **GameRoom removes dead projectiles** — Removes projectiles that collided or left bounds
-4. **Broadcast state** — Send updated projectile positions and wind state to all clients
+4. **Publish state** — Positions, wind and turn state reach clients as synchronized state, not as
+   per-frame broadcasts. Messages are reserved for events: impacts, terrain ops, match end.
 
 **At round boundaries** (after all players have taken one turn):
 
@@ -221,6 +228,45 @@ projectile that can never resolve a permanent freeze for *every* player in the r
 deliberately not an impact — it destroys no terrain and damages nobody, and it reports no position,
 because the position of a projectile that failed to resolve is precisely the value that cannot be
 trusted.
+
+### Match Phase
+
+A match is either **playing** or **ended**. It ends when fewer than two characters remain, at which
+point turn passing, the turn clock and wind changes all stop — with one character left there is
+nobody to pass the turn to, and a lone survivor otherwise plays on indefinitely.
+
+The **winner** is the single survivor. Two characters dying in the same exchange is a **draw**, and
+is reported as one: a winner is only ever named when there is genuinely one character left, never
+inferred from whoever happens to remain. Because deaths can land in the same frame, the outcome is
+decided once at the end of a frame rather than on each removal.
+
+A match only becomes endable once it has had two characters at the same time; before the second
+player arrives, one character is a room waiting to fill.
+
+### Rematch
+
+A finished match can be restarted **without anyone reconnecting**: a new map, full health, spawns
+reassigned, terrain log cleared, for whoever is still in the room. Every connected player must ask,
+and the tally is recomputed when someone leaves as well as when someone asks, so one player's
+departure cannot hold the room in a finished match. A player inside a Reconnection Window is
+counted as still here, so a rematch cannot start without them and leave them stranded on arrival.
+
+### Turn Clock
+
+The time left in the current turn, published as a **remaining duration** rather than a deadline.
+A deadline would require the client's clock to agree with the server's, and a countdown computed
+from a skewed clock is wrong by the skew for as long as the skew lasts.
+
+### Terrain Op Log
+
+The record of every terrain change since the map loaded, replayed in full to each joining client.
+
+It is **compacted, not bounded**: consecutive operations of the same type covering adjacent columns
+merge into one rectangle, which is what lip collapse produces in bulk. Only that rewrite is
+performed, and only against the immediately preceding operation. Terrain operations both remove and
+*add* terrain — sliver fills restore it — so their **order is their meaning**, and an operation that
+looks redundant next to its neighbour may be doing the opposite job. A match that keeps digging new
+ground still grows the log.
 
 ### Kill Boundary
 
