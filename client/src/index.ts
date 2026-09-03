@@ -1,9 +1,35 @@
 import * as PIXI from 'pixi.js';
+import { h, render } from 'preact';
+import { LoginSignup } from './ui/screens/LoginSignup';
+import { supabase } from './supabase';
 import { GameState } from './gameState';
 import { GameScene } from './scenes/GameScene';
 
 async function main() {
   try {
+    // Check for existing session
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    if (!session) {
+      // Show login/signup screen
+      const ui = document.getElementById('ui');
+      if (!ui) throw new Error('No UI element');
+
+      render(
+        h(LoginSignup, {
+          onSuccess: () => {
+            // Restart the app after successful auth
+            window.location.reload();
+          },
+        }),
+        ui,
+      );
+      return;
+    }
+
+    // Auth successful, initialize game
     const app = new PIXI.Application();
 
     await app.init({
