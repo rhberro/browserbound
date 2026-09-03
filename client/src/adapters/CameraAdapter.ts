@@ -62,23 +62,38 @@ export class CameraAdapter {
   /**
    * Constrain camera to stay within map boundaries.
    */
-  private constrainToMapBounds(): void {
-    const canvasWidth = this.app.canvas?.width || 1000;
-    const canvasHeight = this.app.canvas?.height || 600;
+  /**
+   * The viewport in WORLD units.
+   *
+   * `app.screen` is the logical size; `app.canvas` is the backing store, which
+   * is the logical size multiplied by the renderer resolution. They are equal
+   * only while resolution is 1. Reading the canvas therefore worked by
+   * coincidence, and would have centred the camera on the wrong point and
+   * clamped it to the wrong bounds the moment high-density rendering was
+   * switched on — which it now is.
+   */
+  private viewport(): { width: number; height: number } {
+    return {
+      width: this.app.screen?.width || 1000,
+      height: this.app.screen?.height || 600,
+    };
+  }
 
-    this.cameraX = Math.max(canvasWidth / 2, Math.min(MAP_WIDTH - canvasWidth / 2, this.cameraX));
-    this.cameraY = Math.max(canvasHeight / 2, Math.min(MAP_HEIGHT - canvasHeight / 2, this.cameraY));
+  private constrainToMapBounds(): void {
+    const { width, height } = this.viewport();
+
+    this.cameraX = Math.max(width / 2, Math.min(MAP_WIDTH - width / 2, this.cameraX));
+    this.cameraY = Math.max(height / 2, Math.min(MAP_HEIGHT - height / 2, this.cameraY));
   }
 
   /**
    * Apply camera offset to container (move stage so camera focal point is centered).
    */
   private applyToContainer(): void {
-    const canvasWidth = this.app.canvas?.width || 1000;
-    const canvasHeight = this.app.canvas?.height || 600;
+    const { width, height } = this.viewport();
 
-    this.container.position.x = canvasWidth / 2 - this.cameraX;
-    this.container.position.y = canvasHeight / 2 - this.cameraY;
+    this.container.position.x = width / 2 - this.cameraX;
+    this.container.position.y = height / 2 - this.cameraY;
   }
 
   /**

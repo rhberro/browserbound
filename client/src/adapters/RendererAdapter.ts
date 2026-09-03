@@ -80,6 +80,17 @@ interface DeathExplosion {
 export class RendererAdapter {
   private container: PIXI.Container;
   /**
+   * Scene layers, back to front. Named rather than indexed so adding something
+   * new is a decision about where it belongs, not an accident of call order.
+   */
+  private layers = {
+    terrain: new PIXI.Container(),
+    characters: new PIXI.Container(),
+    projectiles: new PIXI.Container(),
+    aim: new PIXI.Container(),
+    effects: new PIXI.Container(),
+  };
+  /**
    * Everything owned per character, in ONE record.
    *
    * These were three parallel playerId-keyed maps that had to be inserted into
@@ -109,8 +120,49 @@ export class RendererAdapter {
   constructor(app: PIXI.Application, container: PIXI.Container) {
     this.container = container;
 
+    // Explicit layers, in back-to-front order. Everything except terrain used
+    // to share one container and be ordered by whenever it happened to be
+    // added — the aim line drew on top only because it was re-added every
+    // frame, which #22 stopped doing. Adding these in order means the ordering
+    // no longer depends on insertion order at all.
+    this.container.addChild(
+      this.layers.terrain,
+      this.layers.characters,
+      this.layers.projectiles,
+      this.layers.aim,
+      this.layers.effects
+    );
+
     this.terrain = new TerrainSurface(app.renderer);
-    this.container.addChildAt(this.terrain.view, 0);
+    this.layers.terrain.addChild(this.terrain.view);
+  }
+
+  /**
+   * Release every GPU resource this renderer owns.
+   *
+   * The terrain render texture alone is the size of the map — several
+   * megabytes — and nothing released it. Page navigation hid that until #21
+   * introduced a rematch, at which point it would leak per match.
+   */
+  destroy(): void {
+    for (const playerId of [...this.playerSprites.keys()]) {
+      this.releaseSprite(playerId);
+    }
+
+    for (const [, graphics] of this.projectileGraphicsMap) graphics.destroy();
+    this.projectileGraphicsMap.clear();
+
+    for (const explosion of this.deathExplosions) explosion.graphics.destroy();
+    this.deathExplosions = [];
+
+    this.aimLine?.destroy();
+    this.aimLine = null;
+    this.explosionGraphics?.destroy();
+    this.explosionGraphics = null;
+
+    this.terrain.destroy();
+    this.container.removeChildren();
+    for (const layer of Object.values(this.layers)) layer.destroy();
   }
 
   /**
@@ -223,7 +275,7 @@ export class RendererAdapter {
     bars.addChild(healthBar);
 
     root.addChild(bars);
-    this.container.addChild(root);
+    this.layers.characters.addChild(root);
 
     // health starts at NaN so the first updateHealthBar always draws.
     return { root, chassis, healthBar, health: NaN, angleIndicator: null };
@@ -239,11 +291,11 @@ export class RendererAdapter {
     const sprite = this.playerSprites.get(playerId);
     if (!sprite) return;
 
-    this.container.removeChild(sprite.root);
+    this.layers.characters.removeChild(sprite.root);
     sprite.root.destroy({ children: true });
 
     if (sprite.angleIndicator) {
-      this.container.removeChild(sprite.angleIndicator);
+      this.layers.aim.removeChild(sprite.angleIndicator);
       sprite.angleIndicator.destroy();
     }
 
@@ -266,7 +318,7 @@ export class RendererAdapter {
 
     if (!isCurrentPlayer) {
       if (sprite.angleIndicator) {
-        this.container.removeChild(sprite.angleIndicator);
+        this.layers.aim.removeChild(sprite.angleIndicator);
         sprite.angleIndicator.destroy();
         sprite.angleIndicator = null;
       }
@@ -279,7 +331,7 @@ export class RendererAdapter {
       // exactly what PixiJS exempts from the don't-rebuild rule.
       const arrow = new PIXI.Graphics();
       buildArrow(arrow, AIM_ARROW_LENGTH, 3, 0xffff00);
-      this.container.addChild(arrow);
+      this.layers.aim.addChild(arrow);
       sprite.angleIndicator = arrow;
     }
 
@@ -328,7 +380,7 @@ export class RendererAdapter {
     // Remove graphics for projectiles that no longer exist
     for (const [projId, graphics] of this.projectileGraphicsMap) {
       if (!gameState.projectiles.has(projId)) {
-        this.container.removeChild(graphics);
+        this.layers.projectiles.removeChild(graphics);
         graphics.destroy();
         this.projectileGraphicsMap.delete(projId);
         this.projectileMotion.remove(projId);
@@ -345,7 +397,7 @@ export class RendererAdapter {
         graphics = new PIXI.Graphics();
         graphics.circle(0, 0, 5);
         graphics.fill(0xff0000);
-        this.container.addChild(graphics);
+        this.layers.projectiles.addChild(graphics);
         this.projectileGraphicsMap.set(projId, graphics);
       }
 
@@ -393,7 +445,7 @@ export class RendererAdapter {
       // the rest of this class.
       if (!this.aimLine) {
         this.aimLine = new PIXI.Graphics();
-        this.container.addChild(this.aimLine);
+        this.layers.aim.addChild(this.aimLine);
       }
       this.aimLine.clear();
 
@@ -420,7 +472,7 @@ export class RendererAdapter {
       this.aimLine.lineTo(powerEndX, powerEndY);
       this.aimLine.stroke({ width: 5, color: 0x00ff00 });
     } else if (this.aimLine) {
-      this.container.removeChild(this.aimLine);
+      this.layers.aim.removeChild(this.aimLine);
       this.aimLine.destroy();
       this.aimLine = null;
     }
@@ -447,7 +499,7 @@ export class RendererAdapter {
       this.explosionGraphics = new PIXI.Graphics();
       this.explosionGraphics.circle(0, 0, EXPLOSION_MAX_RADIUS);
       this.explosionGraphics.fill(0xff8800);
-      this.container.addChild(this.explosionGraphics);
+      this.layers.effects.addChild(this.explosionGraphics);
     }
 
     this.explosionGraphics.visible = true;
@@ -465,7 +517,7 @@ export class RendererAdapter {
    */
   spawnDeathExplosion(x: number, y: number): void {
     const graphics = new PIXI.Graphics();
-    this.container.addChild(graphics);
+    this.layers.effects.addChild(graphics);
 
     const shards = Array.from({ length: 10 }, (_, i) => {
       const angle = (i / 10) * Math.PI * 2 + Math.random() * 0.4;
@@ -492,7 +544,7 @@ export class RendererAdapter {
       const progress = (now - explosion.start) / explosion.duration;
 
       if (progress >= 1) {
-        this.container.removeChild(explosion.graphics);
+        this.layers.effects.removeChild(explosion.graphics);
         explosion.graphics.destroy();
         return false;
       }

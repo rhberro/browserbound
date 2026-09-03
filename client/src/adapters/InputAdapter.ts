@@ -44,11 +44,8 @@ export class InputAdapter {
 
   constructor(private gameState: GameState) {}
 
-  /**
-   * Register keyboard event listeners.
-   */
-  setupInput(): void {
-    document.addEventListener('keydown', (e) => {
+  /** Bound listeners, kept so teardownInput can actually remove them. */
+  private onKeyDown = (e: KeyboardEvent): void => {
       this.keys.set(e.code, true);
 
       // Weapon selection (1, 2, 3 keys)
@@ -68,16 +65,35 @@ export class InputAdapter {
           this.aimPower = 0;
         }
       }
-    });
+    };
 
-    document.addEventListener('keyup', (e) => {
-      this.keys.set(e.code, false);
+  private onKeyUp = (e: KeyboardEvent): void => {
+    this.keys.set(e.code, false);
 
-      // Fire when Space is released
-      if (e.code === 'Space' && this.isCharging) {
-        this.isCharging = false;
-      }
-    });
+    // Fire when Space is released
+    if (e.code === 'Space' && this.isCharging) {
+      this.isCharging = false;
+    }
+  };
+
+  /**
+   * Register keyboard event listeners.
+   *
+   * The handlers are bound fields rather than inline closures so that
+   * teardownInput can remove the same references — an anonymous closure can be
+   * added but never removed, which is a listener leak per scene.
+   */
+  setupInput(): void {
+    document.addEventListener('keydown', this.onKeyDown);
+    document.addEventListener('keyup', this.onKeyUp);
+  }
+
+  /** Remove the listeners setupInput added, and release held keys. */
+  teardownInput(): void {
+    document.removeEventListener('keydown', this.onKeyDown);
+    document.removeEventListener('keyup', this.onKeyUp);
+    this.keys.clear();
+    this.isCharging = false;
   }
 
   /**

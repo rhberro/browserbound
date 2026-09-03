@@ -114,6 +114,20 @@ export class GameScene {
     }
   }
 
+  /**
+   * Tear the scene down.
+   *
+   * Nothing called for this while a page navigation ended every session, but
+   * #21's rematch means a scene can now outlive a match — and the renderer
+   * holds a map-sized render texture.
+   */
+  destroy(): void {
+    this.inputAdapter.teardownInput();
+    this.rendererAdapter.destroy();
+    this.app.stage.removeChild(this.container);
+    this.container.destroy({ children: true });
+  }
+
   render() {
     const aimState = this.inputAdapter.getAimState();
     const myPlayer = this.gameState.getMyPlayer();
