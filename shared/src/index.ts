@@ -4,4 +4,5 @@ export * from './terrainLog';
 export * from './characterPhysics';
 export * from './aim';
 export * from './schema';
+export * from './modes';
 export * from './adapters/WeaponConfigAdapter';

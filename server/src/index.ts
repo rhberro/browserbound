@@ -1,4 +1,4 @@
-import { defineServer, defineRoom } from 'colyseus';
+import { defineServer, defineRoom, LobbyRoom } from 'colyseus';
 import { WebSocketTransport } from '@colyseus/ws-transport';
 import { GameRoom } from './rooms/GameRoom';
 
@@ -22,7 +22,8 @@ const server = defineServer({
     pingMaxRetries: 3,
   }),
   rooms: {
-    game: defineRoom(GameRoom),
+    game: defineRoom(GameRoom, { enableRealtimeListing: true }),
+    lobby: defineRoom(LobbyRoom),
   },
 });
 

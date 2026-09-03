@@ -97,25 +97,41 @@ export class Projectile extends Schema {
   weaponType = 1;
 }
 
+export class Seat extends Schema {
+  @type('string') sessionId = '';
+  @type('string') userId = '';
+  @type('string') displayName = '';
+  @type('number') seatIndex = -1; // -1 = unclaimed
+  @type('boolean') ready = false;
+  @type('boolean') connected = false;
+}
+
 /**
  * Whether the match is still being played.
  *
+ * 'lobby' is the pre-match phase where players claim seats and ready up.
+ * 'playing' is the active match phase.
  * 'ended' freezes the turn loop, the turn clock and the wind: with one
- * character left there is nobody to pass the turn to, and a lone survivor was
- * previously left playing on their own indefinitely.
+ * team left there is nobody to pass the turn to.
  */
-export type MatchPhase = 'playing' | 'ended';
+export type MatchPhase = 'lobby' | 'playing' | 'ended';
 
 export class RoomState extends Schema {
+  // Lobby phase fields
+  @type('string') roomName = '';
+  @type('string') hostSessionId = '';
+  @type('number') teamCount = 2;
+  @type('number') teamSize = 1;
+  @type({ map: Seat }) seats = new MapSchema<Seat>();
+
+  // Match phase fields
   @type('string') currentPlayerId = '';
-  @type('string') matchPhase: MatchPhase = 'playing';
+  @type('string') matchPhase: MatchPhase = 'lobby';
   /**
-   * Session id of the winner once the match has ended.
-   *
-   * Empty string means a DRAW — both characters died in the same exchange —
-   * which is why the winner is not simply inferred from whoever is left.
+   * Team id of the winning team once the match has ended.
+   * -1 means a DRAW — multiple teams died simultaneously.
    */
-  @type('string') winnerId = '';
+  @type('number') winningTeamId = -1;
   @type('number') windSpeed = 5;
   @type('number') windDirection = 0;
   /**
@@ -166,10 +182,14 @@ export type ProjectileView = Pick<Projectile, 'x' | 'y'>;
 /** The client's picture of the room, minus the maps it reads separately. */
 export type TurnView = Pick<
   RoomState,
+  | 'roomName'
+  | 'hostSessionId'
+  | 'teamCount'
+  | 'teamSize'
   | 'currentPlayerId'
   | 'windSpeed'
   | 'windDirection'
   | 'turnSecondsRemaining'
   | 'matchPhase'
-  | 'winnerId'
+  | 'winningTeamId'
 >;

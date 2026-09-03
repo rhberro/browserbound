@@ -1,4 +1,5 @@
 import { Room, Client } from 'colyseus';
+import { jwtVerify } from 'jose';
 import {
   GRAVITY, WIND_INTEGRATION, TerrainOp, MAP_WIDTH, MAP_HEIGHT,
   DEFAULT_CRATER_RADIUS, applyOpToBitmap, collapseLips, appendOp, PLAYER_HEIGHT,
@@ -8,11 +9,12 @@ import {
   walkStep, isSolid, isGrounded, groundDistance, ejectUp, computeTilt, Body,
   pointInBody, distanceToBody,
   worldFiringAngle, clampAimDeg, degToRad,
-  Player, RoomState, Projectile,
+  Player, RoomState, Projectile, Seat, resolveMode, teamOfSeat,
 } from '@browserbond/shared';
 import { PhysicsAdapter, Wind } from '@browserbond/shared/src/adapters/PhysicsAdapter';
 import { MessageValidationAdapter } from '@browserbond/shared/src/adapters/MessageValidationAdapter';
 import { WindManager } from '../adapters/WindManager';
+import { fetchDisplayName } from '../adapters/SupabaseAdmin';
 import { shouldAdvanceTurn, nothingInFlight } from './turnLoop';
 import { advanceTimer, windupElapsed, fallDelayElapsed, nextFallSpeed } from './gait';
 import { loadMap, loadRandomMap, LoadedMap } from '../adapters/MapLoader';
@@ -53,7 +55,39 @@ function makeProjectile(
 /** Fixed simulation tick, matching setSimulationInterval below. */
 const SIMULATION_INTERVAL_MS = 16;
 
+interface AuthPayload {
+  sub: string;
+  userId: string;
+  email: string;
+}
+
 export class GameRoom extends Room {
+  static async onAuth(token: string) {
+    try {
+      const secret = new TextEncoder().encode(process.env.SUPABASE_JWT_SECRET || '');
+      if (secret.length === 0) {
+        throw new Error('SUPABASE_JWT_SECRET not configured');
+      }
+
+      const verified = await jwtVerify(token, secret);
+      const sub = (verified.payload.sub as string) || '';
+
+      if (!sub) {
+        throw new Error('Invalid JWT: missing sub');
+      }
+
+      const displayName = await fetchDisplayName(sub);
+
+      return {
+        userId: sub,
+        displayName,
+        email: verified.payload.email as string,
+      };
+    } catch (error) {
+      console.error('JWT verification failed:', error);
+      throw error;
+    }
+  }
   maxClients = 2;
   /**
    * 0.17 dropped the state generic: the room declares its state as a field and
@@ -139,7 +173,26 @@ export class GameRoom extends Room {
     this.terrainBitmap = this.map.mask;
   }
 
-  onCreate() {
+  onCreate(options: any) {
+    // Configure room from options
+    const mode = options?.mode || 'duel';
+    const modeConfig = resolveMode(mode, options?.ffaCount);
+    const roomName = options?.roomName || `Game ${Math.random().toString(36).substring(7)}`;
+
+    this.state.roomName = roomName;
+    this.state.teamCount = modeConfig.teamCount;
+    this.state.teamSize = modeConfig.teamSize;
+    this.maxClients = modeConfig.teamCount * modeConfig.teamSize;
+
+    // Set room metadata for the lobby browser to discover
+    this.setMetadata({
+      roomName,
+      mode,
+      teamCount: modeConfig.teamCount,
+      teamSize: modeConfig.teamSize,
+      capacity: this.maxClients,
+    });
+
     // Initialize adapters
     this.physics = new PhysicsAdapter({
       gravity: GRAVITY,
@@ -154,6 +207,43 @@ export class GameRoom extends Room {
     // Physics loop - update every 16ms. `setSimulationInterval` in 0.18 is a
     // deprecated alias for this.
     this.setTimestep(() => this.updatePhysics(), SIMULATION_INTERVAL_MS);
+
+    // Lobby phase message handlers
+    this.onMessage('claimSeat', (client, data: { seatIndex: number }) => {
+      if (this.state.matchPhase !== 'lobby') return;
+      const seat = this.state.seats.get(client.sessionId);
+      if (!seat || seat.ready) return; // Can't change seat while ready
+
+      const targetSeat = Array.from(this.state.seats.values()).find(s => s.seatIndex === data.seatIndex);
+      if (targetSeat && targetSeat.sessionId !== client.sessionId) return; // Seat already taken
+
+      if (seat.seatIndex >= 0) {
+        // Release current seat
+        const oldSeat = Array.from(this.state.seats.values()).find(s => s.seatIndex === seat.seatIndex && s.sessionId === client.sessionId);
+        if (oldSeat) oldSeat.seatIndex = -1;
+      }
+
+      seat.seatIndex = data.seatIndex;
+    });
+
+    this.onMessage('setReady', (client, data: { ready: boolean }) => {
+      if (this.state.matchPhase !== 'lobby') return;
+      const seat = this.state.seats.get(client.sessionId);
+      if (!seat || seat.seatIndex < 0) return; // Must have a seat to ready up
+
+      seat.ready = data.ready;
+    });
+
+    this.onMessage('startGame', (client) => {
+      if (this.state.matchPhase !== 'lobby') return;
+      if (client.sessionId !== this.state.hostSessionId) return; // Only host can start
+
+      // Check if all seats are filled and ready
+      const allFilled = Array.from(this.state.seats.values()).every(s => s.seatIndex >= 0 && s.ready);
+      if (!allFilled) return;
+
+      this.beginMatch();
+    });
 
     this.onMessage('move', (client, data: { left: boolean; right: boolean; jump: boolean }) => {
       const validation = this.validator.validateMoveMessage(data, this.buildValidationGameState(), client.sessionId);
@@ -288,24 +378,129 @@ export class GameRoom extends Room {
     return player;
   }
 
-  private checkMatchEnd(): void {
-    if (!this.matchStarted || this.state.matchPhase === 'ended') return;
-    if (this.state.players.size >= 2) return;
+  private getPlayerTeam(sessionId: string): number {
+    const seat = this.state.seats.get(sessionId);
+    if (!seat || seat.seatIndex < 0) return -1;
+    return teamOfSeat(seat.seatIndex, this.state.teamSize);
+  }
 
-    const survivors = Array.from(this.state.players.keys());
+  private getTeamsWithLivingPlayers(): Set<number> {
+    const teams = new Set<number>();
+    for (const player of this.state.players.values()) {
+      if (player.health > 0) {
+        const team = this.getPlayerTeam(player.id);
+        teams.add(team);
+      }
+    }
+    return teams;
+  }
+
+  private checkMatchEnd(): void {
+    if (!this.matchStarted || this.state.matchPhase !== 'playing') return;
+
+    const livingTeams = this.getTeamsWithLivingPlayers();
+    if (livingTeams.size > 1) return; // Match still ongoing
+
     this.state.matchPhase = 'ended';
-    // Empty means a draw. A mutual kill leaves nobody, and picking an
-    // arbitrary winner from an empty field would be a lie.
-    this.state.winnerId = survivors.length === 1 ? survivors[0] : '';
+    // -1 means a draw (no teams left or simultaneous elimination)
+    // Otherwise, the surviving team is in livingTeams
+    this.state.winningTeamId = livingTeams.size === 1 ? Array.from(livingTeams)[0] : -1;
 
     // Nobody's turn, no clock, no more wind changes.
     this.state.currentPlayerId = '';
     this.endTurnClock();
-    this.rematchReady.clear();
 
-    // No matchEnded broadcast: matchPhase and winnerId are synchronized state,
-    // and the client renders the result from them. A message saying the same
-    // thing again is a second source of truth for one fact.
+    // Schedule return to lobby after a delay for result display
+    this.clock.setTimeout(() => this.returnToLobby(), 3000);
+  }
+
+  private returnToLobby(): void {
+    this.state.matchPhase = 'lobby';
+    this.state.players.clear();
+    this.state.projectiles.clear();
+    this.state.currentPlayerId = '';
+    this.state.windSpeed = 5;
+    this.state.windDirection = 0;
+    this.state.turnSecondsRemaining = 0;
+    this.state.winningTeamId = -1;
+
+    // Reset all seats' ready status while retaining seats
+    for (const seat of this.state.seats.values()) {
+      seat.ready = false;
+    }
+
+    // Reset internal state
+    this.matchStarted = false;
+    this.terrainOps = [];
+    this.pendingProjectiles = [];
+    this.walkWindup.clear();
+    this.fallDelay.clear();
+    this.windDrift.clear();
+    this.blockedNotified.clear();
+    this.playerInputs.clear();
+    this.currentFrame = 0;
+    this.initializeTerrainPlatform();
+    this.publishWind();
+
+    // Un-lock the room and make it visible again
+    this.unlock();
+    this.setMetadata({
+      roomName: this.state.roomName,
+      mode: this.getModeFromConfig(),
+      teamCount: this.state.teamCount,
+      teamSize: this.state.teamSize,
+      capacity: this.maxClients,
+    });
+  }
+
+  private getModeFromConfig(): string {
+    if (this.state.teamSize === 1) {
+      if (this.state.teamCount === 2) return 'duel';
+      return 'ffa';
+    } else if (this.state.teamSize === 2) {
+      return '2v2';
+    } else if (this.state.teamSize === 3) {
+      return '3v3';
+    }
+    return 'duel';
+  }
+
+  private beginMatch(): void {
+    this.lock();
+    this.setMetadata({
+      roomName: this.state.roomName,
+      mode: this.getModeFromConfig(),
+      teamCount: this.state.teamCount,
+      teamSize: this.state.teamSize,
+      capacity: this.maxClients,
+      unlisted: true,
+    });
+
+    this.terrainOps = [];
+    this.initializeTerrainPlatform();
+    this.state.projectiles.clear();
+    this.pendingProjectiles = [];
+    this.state.players.clear();
+    this.playerInputs.clear();
+    this.walkWindup.clear();
+    this.fallDelay.clear();
+    this.windDrift.clear();
+    this.blockedNotified.clear();
+    this.currentFrame = 0;
+
+    let spawnIndex = 0;
+    for (const seat of this.state.seats.values()) {
+      if (seat.seatIndex >= 0) {
+        this.spawnCharacter(seat.sessionId, spawnIndex);
+        spawnIndex++;
+      }
+    }
+
+    this.state.matchPhase = 'playing';
+    this.matchStarted = true;
+
+    const first = this.lowestDelayPlayerId();
+    if (first) this.beginTurn(first);
   }
 
   private endTurnClock(): void {
@@ -349,7 +544,7 @@ export class GameRoom extends Room {
 
     this.matchStarted = this.state.players.size >= 2;
     this.state.matchPhase = 'playing';
-    this.state.winnerId = '';
+    this.state.winningTeamId = -1;
     // A rematch gets fresh weather rather than inheriting the wind the last
     // match happened to drift into.
     this.windManager.generateNewWind();
@@ -509,6 +704,13 @@ export class GameRoom extends Room {
         for (const [playerId, player] of this.state.players) {
           // Skip the firer
           if (playerId === proj.firedBy) continue;
+
+          // Skip teammates (no friendly fire)
+          const firerTeam = this.getPlayerTeam(proj.firedBy);
+          const targetTeam = this.getPlayerTeam(playerId);
+          if (firerTeam >= 0 && targetTeam >= 0 && firerTeam === targetTeam) {
+            continue;
+          }
 
           // Knockback DIRECTION only, and deliberately still from the contact
           // point: which way a blast shoves a character is a question about
@@ -1044,19 +1246,35 @@ export class GameRoom extends Room {
     };
   }
 
-  onJoin(client: Client) {
-    this.spawnCharacter(client.sessionId, this.state.players.size);
-    if (this.state.players.size >= 2) this.matchStarted = true;
+  onJoin(client: Client, options: any) {
+    // Create a seat for this player
+    const seat = new Seat();
+    seat.sessionId = client.sessionId;
+    seat.userId = options?.userId || '';
+    seat.displayName = options?.displayName || `Player ${client.sessionId.substring(0, 4)}`;
+    seat.seatIndex = -1; // Start unclaimed
+    seat.ready = false;
+    seat.connected = true;
 
-    // Ensure currentPlayerId always points to a valid player, and that whoever
-    // holds the turn actually has a budget and a deadline.
-    if (this.state.currentPlayerId === '' || !this.state.players.has(this.state.currentPlayerId)) {
-      const next = this.lowestDelayPlayerId();
-      if (next) this.beginTurn(next);
+    this.state.seats.set(client.sessionId, seat);
+
+    // First joiner becomes the host
+    if (this.state.hostSessionId === '') {
+      this.state.hostSessionId = client.sessionId;
     }
 
-    // Send current terrain state to the client
-    client.send('terrainSync', { mapId: this.map.id, ops: this.terrainOps });
+    // In match phase, handle reconnections
+    if (this.state.matchPhase === 'playing') {
+      // This is a reconnection during an active match
+      const player = this.state.players.get(client.sessionId);
+      if (player) {
+        player.connected = true;
+        this.droppedSessions.delete(client.sessionId);
+      }
+    } else {
+      // Lobby phase - send current terrain state for later use
+      client.send('terrainSync', { mapId: this.map.id, ops: this.terrainOps });
+    }
   }
 
   /**
