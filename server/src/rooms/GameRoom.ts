@@ -4,7 +4,8 @@ import {
   POWER_SCALE, GRAVITY, WIND_INTEGRATION, TerrainOp, MAP_WIDTH, MAP_HEIGHT,
   DEFAULT_CRATER_RADIUS, applyOpToBitmap, collapseLips, PLAYER_HEIGHT,
   MOVE_BUDGET, WALK_SPEED, TURN_TIME_MS, TERMINAL_VELOCITY,
-  walkStep, settle, testCollisionY, pushOutOfWall, airborneHorizontal, Body,
+  AIM_MIN_DEG, AIM_MAX_DEG,
+  walkStep, settle, testCollisionY, pushOutOfWall, airborneHorizontal, computeTilt, Body,
 } from '@browserbond/shared';
 import { PhysicsAdapter, Wind } from '@browserbond/shared/src/adapters/PhysicsAdapter';
 import { MessageValidationAdapter } from '@browserbond/shared/src/adapters/MessageValidationAdapter';
@@ -31,6 +32,10 @@ class Player extends Schema {
   @type('number') movementBudget = 0;
   /** Falling. Walking and airborne motion obey different rules. */
   @type('boolean') airborne = false;
+  /** Chassis tilt in radians. Calculated from terrain under the character. Zero when airborne. */
+  @type('number') tilt = 0;
+  /** Aim angle in radians, measured RELATIVE TO THE CHASSIS, clamped to [AIM_MIN_DEG, AIM_MAX_DEG]. */
+  @type('number') aimAngle = 0;
 }
 
 class Projectile extends Schema {
@@ -164,6 +169,13 @@ export class GameRoom extends Room<GameState> {
     });
 
     this.onMessage('aimAngle', (client, data: { angle: number }) => {
+      const player = this.state.players.get(client.sessionId);
+      if (!player || this.state.currentPlayerId !== client.sessionId) return;
+
+      // Clamp chassis-relative aim angle to valid range (in degrees, convert to radians)
+      const clampedDeg = Math.max(AIM_MIN_DEG, Math.min(AIM_MAX_DEG, data.angle));
+      player.aimAngle = (clampedDeg * Math.PI) / 180;
+
       // Don't broadcast aim angle to other players - it's exclusive to each player's UI
     });
 
@@ -179,7 +191,16 @@ export class GameRoom extends Room<GameState> {
 
       const weaponType = data.weaponType || 1;
       const weapon = getWeapon(weaponType);
-      const projectileSpecs = generateProjectileSpecs(weaponType, data.angle);
+
+      // Calculate world angle from chassis-relative aim + tilt + facing
+      // World angle = tilt + aimAngle, then mirror for facing (left-facing player)
+      let worldAngle = player.tilt + player.aimAngle;
+      if (player.facing === -1) {
+        // Left-facing: mirror the angle around vertical (π - angle)
+        worldAngle = Math.PI - worldAngle;
+      }
+
+      const projectileSpecs = generateProjectileSpecs(weaponType, worldAngle);
       const speed = data.power * POWER_SCALE;
 
       // Firing ends movement and forfeits the remaining budget. The turn
@@ -560,6 +581,14 @@ export class GameRoom extends Room<GameState> {
       player.x = body.x;
       player.y = body.y;
 
+      // Calculate chassis tilt based on terrain under the character.
+      // Tilt is zero when airborne (chassis is level mid-air).
+      if (player.airborne) {
+        player.tilt = 0;
+      } else {
+        player.tilt = computeTilt(this.terrainBitmap, MAP_WIDTH, MAP_HEIGHT, player.x, player.y);
+      }
+
       // Kill Boundary — the only lethal consequence of falling. Characters
       // take no damage from impact however far they fall.
       if (player.y > MAP_HEIGHT + 50 || player.x < -50 || player.x > MAP_WIDTH + 50 || player.y < -50) {
@@ -579,7 +608,10 @@ export class GameRoom extends Room<GameState> {
   private beginTurn(playerId: string) {
     this.state.currentPlayerId = playerId;
     const player = this.state.players.get(playerId);
-    if (player) player.movementBudget = MOVE_BUDGET;
+    if (player) {
+      player.movementBudget = MOVE_BUDGET;
+      player.aimAngle = 0; // Reset aim angle at the start of each turn
+    }
     this.state.turnEndsAt = Date.now() + TURN_TIME_MS;
     this.walkCarry.set(playerId, 0);
     this.airborneVxCarry.set(playerId, 0);
