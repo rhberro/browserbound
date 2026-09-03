@@ -47,6 +47,29 @@ describe('clear op', () => {
   });
 });
 
+describe('applyOpToBitmap reports the pixels it changed', () => {
+  it('counts the solid pixels an explosion removes', () => {
+    const m = new Uint8Array(W * H).fill(1);
+    const removed = applyOpToBitmap(m, { type: 'explosion', x: 10, y: 10, radius: 3 }, W, H);
+    // A radius-3 disc fully inside the map covers exactly 29 lattice points.
+    expect(removed).toBe(29);
+  });
+
+  it('counts zero when the explosion hits already-empty ground', () => {
+    const m = new Uint8Array(W * H);
+    const removed = applyOpToBitmap(m, { type: 'explosion', x: 10, y: 10, radius: 3 }, W, H);
+    expect(removed).toBe(0);
+  });
+
+  it('counts pixels a clear op removes and a rect op adds', () => {
+    const m = new Uint8Array(W * H).fill(1);
+    const removed = applyOpToBitmap(m, { type: 'clear', x: 10, y: 100, width: 5, height: 20 }, W, H);
+    expect(removed).toBe(100);
+    const added = applyOpToBitmap(m, { type: 'rect', x: 10, y: 100, width: 5, height: 20 }, W, H);
+    expect(added).toBe(100);
+  });
+});
+
 describe('collapseLips', () => {
   it('removes a thin roof over a gap too short to stand in', () => {
     const m = ground(100);

@@ -549,19 +549,22 @@ export class GameRoom extends Room {
         // the map boundary and — for a shot that went out over the TOP — drew an
         // explosion in the open sky. Terrain is destroyed where a shot actually
         // hit something.
+        let removedPixels = 0;
         if (collision.type !== 'miss') {
-          this.destroyTerrain(collision.x, collision.y, weapon.craterRadius);
+          removedPixels = this.destroyTerrain(collision.x, collision.y, weapon.craterRadius);
         }
 
         // Where and what, nothing more. The damage this blast did travels as
         // synchronized health; repeating it here made the payload a second
-        // source of truth that no client ever read.
+        // source of truth that no client ever read. `removedPixels` rides along
+        // so the client can scale debris to how much earth was actually moved.
         this.broadcast('collision', {
           type: collision.type,
           projectileId: proj.id,
           ...(collision.type === 'player' ? { targetId: collision.playerId } : {}),
           x: collision.x,
           y: collision.y,
+          removedPixels,
         });
 
         // Safe now that the walk is finished.
@@ -954,12 +957,15 @@ export class GameRoom extends Room {
     }
   }
 
-  private destroyTerrain(x: number, y: number, radius: number = DEFAULT_CRATER_RADIUS) {
+  private destroyTerrain(x: number, y: number, radius: number = DEFAULT_CRATER_RADIUS): number {
     const op: TerrainOp = { type: 'explosion', x: Math.floor(x), y: Math.floor(y), radius };
     // Compacted rather than appended blindly: the log is replayed in full to
     // every joining client, and lip collapse below emits one op per column.
     this.terrainOps = appendOp(this.terrainOps, op);
-    applyOpToBitmap(this.terrainBitmap, op, MAP_WIDTH, MAP_HEIGHT);
+    // How much earth this blast actually moved — the debris budget. A shot into
+    // open ground reports the full crater; the same shot into an existing
+    // crater reports almost nothing, because there is nothing left to remove.
+    const removedPixels = applyOpToBitmap(this.terrainBitmap, op, MAP_WIDTH, MAP_HEIGHT);
     this.broadcast('terrainOp', op);
 
     // A shot landing inside an existing crater carves below the surface and
@@ -979,6 +985,8 @@ export class GameRoom extends Room {
       applyOpToBitmap(this.terrainBitmap, lip, MAP_WIDTH, MAP_HEIGHT);
       this.broadcast('terrainOp', lip);
     }
+
+    return removedPixels;
   }
 
   private buildValidationGameState(): {

@@ -8,12 +8,22 @@ export const MAP_WIDTH = 2000;
 export const MAP_HEIGHT = 1200;
 export const DEFAULT_CRATER_RADIUS = 50;
 
+/**
+ * Apply an op to the bitmap, and report how many pixels it actually changed.
+ *
+ * The count is what `rect` added (0→1) or what `explosion`/`clear` removed
+ * (1→0) — pixels already at the target value do not count. `destroyTerrain`
+ * uses the explosion return as the debris budget: a shot into open ground
+ * reports a large number, the same shot into an existing crater reports almost
+ * none, because there is nothing left to remove.
+ */
 export function applyOpToBitmap(
   bitmap: Uint8Array,
   op: TerrainOp,
   mapWidth: number,
   mapHeight: number
-): void {
+): number {
+  let changed = 0;
   if (op.type === 'rect' || op.type === 'clear') {
     const fill = op.type === 'rect' ? 1 : 0;
     const x0 = Math.max(0, Math.floor(op.x));
@@ -22,7 +32,12 @@ export function applyOpToBitmap(
     const y1 = Math.min(mapHeight, Math.ceil(op.y + op.height));
     for (let y = y0; y < y1; y++) {
       const row = y * mapWidth;
-      for (let x = x0; x < x1; x++) bitmap[row + x] = fill;
+      for (let x = x0; x < x1; x++) {
+        if (bitmap[row + x] !== fill) {
+          bitmap[row + x] = fill;
+          changed++;
+        }
+      }
     }
   } else {
     const { x: cx, y: cy, radius: r } = op;
@@ -36,10 +51,14 @@ export function applyOpToBitmap(
       const dy = y - cy;
       for (let x = x0; x <= x1; x++) {
         const dx = x - cx;
-        if (dx * dx + dy * dy <= rSq) bitmap[row + x] = 0;
+        if (dx * dx + dy * dy <= rSq && bitmap[row + x] !== 0) {
+          bitmap[row + x] = 0;
+          changed++;
+        }
       }
     }
   }
+  return changed;
 }
 
 

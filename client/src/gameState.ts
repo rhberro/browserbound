@@ -34,13 +34,27 @@ function snapshot(player: Player): PlayerView {
   };
 }
 
+/**
+ * A single impact, as the server reported it in the `collision` message.
+ *
+ * `removedPixels` is how much terrain the blast actually carved out — zero for
+ * a miss — and is what the renderer scales debris to.
+ */
+export interface CollisionEvent {
+  type: string;
+  x: number;
+  y: number;
+  time: number;
+  removedPixels: number;
+}
+
 export class GameState {
   private client: Client;
   private room: Room<RoomState> | null = null;
   public players: Map<string, PlayerView> = new Map();
   public turnState: TurnView | null = null;
   public projectiles: Map<string, ProjectileView> = new Map();
-  public collision: { type: string; x: number; y: number; time: number } | null = null;
+  public collision: CollisionEvent | null = null;
   public onTerrainOp: ((op: TerrainOp) => void) | null = null;
 
   /**
@@ -339,6 +353,7 @@ export class GameState {
           // Stamped on RELEASE, not on arrival: the explosion animation runs
           // off this, and a timestamp from a delay ago starts it part-played.
           time: Date.now(),
+          removedPixels: data.removedPixels ?? 0,
         };
       });
 

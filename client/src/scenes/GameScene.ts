@@ -40,6 +40,9 @@ export class GameScene {
     // the map PNG has been painted, so destruction lands on top of the ground
     // rather than being wiped by the arriving map (ADR 0002).
     this.gameState.setOnMapLoad((mapId) => {
+      // A fresh map means a fresh match: debris from the last impact must not
+      // carry into it.
+      this.rendererAdapter.clearParticles();
       void this.rendererAdapter.loadMap(mapId);
     });
     this.gameState.setOnTerrainOp((op) => this.rendererAdapter.applyTerrainOp(op));
@@ -87,6 +90,9 @@ export class GameScene {
 
     // Update projectile graphics
     this.rendererAdapter.updateProjectiles(this.gameState);
+
+    // Advance debris particles
+    this.rendererAdapter.updateParticles(deltaMS);
 
     // A new turn forces a resend even if the dialled-in angle has not moved,
     // so the server's stored aim can never sit at a stale value while the HUD

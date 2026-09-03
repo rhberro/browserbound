@@ -18,9 +18,11 @@ import {
   PLAYER_WIDTH,
   PLAYER_HEIGHT,
 } from '@browserbond/shared';
-import type { GameState } from '../gameState';
+import type { GameState, CollisionEvent } from '../gameState';
 import { TerrainSurface } from '../rendering/TerrainSurface';
 import { PlayerMotion } from '../rendering/PlayerMotion';
+import { ParticleSystem } from '../rendering/ParticleSystem';
+import { spawnDebris } from '../rendering/particles';
 import { SHOT_DELAY_MS } from '../rendering/ShotClock';
 import type { AimState } from './InputAdapter';
 
@@ -148,6 +150,10 @@ export class RendererAdapter {
   private explosionGraphics: PIXI.Graphics | null = null;
   private explosionDuration: number = 500;
   private deathExplosions: DeathExplosion[] = [];
+  /** Impact debris pool, drawn in the effects layer alongside the explosion. */
+  private particles: ParticleSystem;
+  /** The collision the debris was last spawned for, so it spawns exactly once. */
+  private lastDebrisCollision: CollisionEvent | null = null;
 
   constructor(app: PIXI.Application, container: PIXI.Container) {
     this.container = container;
@@ -167,6 +173,8 @@ export class RendererAdapter {
 
     this.terrain = new TerrainSurface(app.renderer);
     this.layers.terrain.addChild(this.terrain.view);
+
+    this.particles = new ParticleSystem(this.layers.effects);
   }
 
   /**
@@ -191,6 +199,7 @@ export class RendererAdapter {
     this.aimLine = null;
     this.explosionGraphics?.destroy();
     this.explosionGraphics = null;
+    this.particles.destroy();
 
     this.terrain.destroy();
     this.container.removeChildren();
@@ -531,10 +540,18 @@ export class RendererAdapter {
   }
 
   /**
-   * Render explosion animation.
+   * Render explosion animation, and spawn its debris exactly once.
    */
-  renderExplosion(collision: { type: string; x: number; y: number; time: number } | null): void {
+  renderExplosion(collision: CollisionEvent | null): void {
     if (!collision) return;
+
+    // The debris burst belongs to the impact, so it is spawned the moment the
+    // explosion becomes visible — once, not once per frame. A miss reports zero
+    // removed pixels and spawns nothing.
+    if (collision !== this.lastDebrisCollision) {
+      this.lastDebrisCollision = collision;
+      this.spawnImpactDebris(collision.x, collision.y, collision.removedPixels);
+    }
 
     const progress = Math.min(1, (Date.now() - collision.time) / this.explosionDuration);
 
@@ -559,6 +576,27 @@ export class RendererAdapter {
     this.explosionGraphics.y = collision.y;
     this.explosionGraphics.scale.set(progress);
     this.explosionGraphics.alpha = 1 - progress;
+  }
+
+  /**
+   * Spawn the debris for one impact, scaled to how much terrain it removed.
+   */
+  spawnImpactDebris(x: number, y: number, removedPixels: number): void {
+    this.particles.spawn(spawnDebris(x, y, removedPixels));
+  }
+
+  /** Advance the debris particle pool by one frame. */
+  updateParticles(dtMs: number): void {
+    this.particles.update(dtMs);
+  }
+
+  /**
+   * Drop every live debris particle. Called at match start: debris lives under
+   * a second, but a rematch resets the field and must not inherit the tail of
+   * the previous match's last impact.
+   */
+  clearParticles(): void {
+    this.particles.clear();
   }
 
   /**
