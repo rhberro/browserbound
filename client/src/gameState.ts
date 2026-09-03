@@ -1,5 +1,10 @@
 import { Client, Room } from 'colyseus.js';
-import { PlayerState, TurnState, calculateTrajectory, TerrainOp } from '@browserbond/shared';
+import {
+  PlayerState,
+  TurnState,
+  TerrainOp,
+  RECONNECT_WINDOW_SECONDS,
+} from '@browserbond/shared';
 
 export class GameState {
   private client: Client;
@@ -38,15 +43,71 @@ export class GameState {
     this.client = new Client(url);
   }
 
-  async connect(): Promise<void> {
-    this.room = await this.client.joinOrCreate('game');
+  /**
+   * Reconnection is driven entirely from here.
+   *
+   * The server holds a character, its turn and its Movement Budget for
+   * RECONNECT_WINDOW_SECONDS after a drop; none of that is any use unless the
+   * client actually comes back for it. The token is kept in sessionStorage so a
+   * reload inside the window rejoins the same match rather than starting a new
+   * one — it is scoped to the tab and cleared on a deliberate leave, so it can
+   * never resurrect a match the player has finished with.
+   */
+  private static readonly TOKEN_KEY = 'browserbound:reconnectionToken';
+  private leaving = false;
 
-    if (this.room.state) {
+  /** Notified when the connection drops and again when it is restored. */
+  public onConnectionChange: ((connected: boolean) => void) | null = null;
+
+  private storedToken(): string | null {
+    try {
+      return sessionStorage.getItem(GameState.TOKEN_KEY);
+    } catch {
+      // Private browsing modes throw on access. A missing token just means a
+      // fresh join, which is the correct fallback.
+      return null;
+    }
+  }
+
+  private rememberToken(token: string | null): void {
+    try {
+      if (token) sessionStorage.setItem(GameState.TOKEN_KEY, token);
+      else sessionStorage.removeItem(GameState.TOKEN_KEY);
+    } catch {
+      // Non-fatal: reconnection simply will not survive a reload.
+    }
+  }
+
+  async connect(): Promise<void> {
+    const token = this.storedToken();
+    if (token) {
+      try {
+        this.room = await this.client.reconnect(token);
+      } catch {
+        // Window expired, or the room is gone. Fall through to a fresh join.
+        this.rememberToken(null);
+      }
+    }
+    if (!this.room) {
+      this.room = await this.client.joinOrCreate('game');
+    }
+    this.rememberToken(this.room.reconnectionToken);
+    this.watchForDisconnect();
+
+    this.bindStateListeners();
+
+    // Register message handlers once at connection time
+    this.registerMessageHandlers();
+  }
+
+  /** Subscribe to the room's synchronized state. Re-run after a reconnect. */
+  private bindStateListeners(): void {
+    if (this.room?.state) {
       // Initialize turnState immediately from current state (don't wait for onChange)
       this.updateTurnState();
     }
 
-    if (this.room.state && this.room.state.players) {
+    if (this.room?.state && this.room.state.players) {
       this.room.state.players.onAdd((player: any, key: string) => {
         this.players.set(key, {
           id: key,
@@ -55,6 +116,7 @@ export class GameState {
           health: player.health,
           currentlyAiming: false,
           facing: player.facing || 1,
+          connected: player.connected !== false,
         });
 
         player.onChange(() => {
@@ -64,6 +126,7 @@ export class GameState {
             p.y = player.y;
             p.health = player.health;
             p.facing = player.facing;
+            p.connected = player.connected !== false;
           }
         });
       });
@@ -73,15 +136,82 @@ export class GameState {
       });
     }
 
-    if (this.room.state) {
+    if (this.room?.state) {
       // Listen for state changes
       this.room.state.onChange(() => {
         this.updateTurnState();
       });
     }
+  }
 
-    // Register message handlers once at connection time
+  /**
+   * Rejoin after an unexpected drop, for as long as the server's window lasts.
+   *
+   * Code 1000 is a clean close — the player left on purpose, or the match
+   * ended — and must not be retried, or leaving the game would immediately
+   * rejoin it. Anything else is the case this exists for.
+   */
+  private watchForDisconnect(): void {
+    if (!this.room) return;
+    this.room.onLeave((code: number) => {
+      if (this.leaving || code === 1000) {
+        this.rememberToken(null);
+        return;
+      }
+      this.onConnectionChange?.(false);
+      void this.reconnectLoop();
+    });
+  }
+
+  private async reconnectLoop(): Promise<void> {
+    const token = this.storedToken();
+    if (!token) return;
+
+    const deadline = Date.now() + RECONNECT_WINDOW_SECONDS * 1000;
+    let delayMs = 500;
+
+    while (Date.now() < deadline && !this.leaving) {
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+      // Back off, but keep retrying often enough to use most of the window.
+      delayMs = Math.min(delayMs * 2, 4000);
+      try {
+        this.room = await this.client.reconnect(token);
+      } catch {
+        continue;
+      }
+      this.rememberToken(this.room.reconnectionToken);
+      this.rebindRoom();
+      this.onConnectionChange?.(true);
+      return;
+    }
+
+    // The window has closed; the server has already removed the character.
+    this.rememberToken(null);
+  }
+
+  /**
+   * Re-attach every listener to the room object returned by a reconnect.
+   *
+   * `reconnect` hands back a NEW Room instance, so callbacks registered on the
+   * old one are attached to an object nothing will ever update again — the
+   * game would appear frozen while the connection was in fact healthy.
+   */
+  private rebindRoom(): void {
+    if (!this.room) return;
+    this.players.clear();
+    this.projectiles.clear();
+    this.bindStateListeners();
     this.registerMessageHandlers();
+    this.watchForDisconnect();
+    this.updateTurnState();
+  }
+
+  /** Leave on purpose: no reconnection window, no stored token. */
+  async leave(): Promise<void> {
+    this.leaving = true;
+    this.rememberToken(null);
+    await this.room?.leave(true);
+    this.room = null;
   }
 
   private registerMessageHandlers(): void {

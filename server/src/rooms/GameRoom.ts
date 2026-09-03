@@ -4,7 +4,7 @@ import {
   POWER_SCALE, GRAVITY, WIND_INTEGRATION, TerrainOp, MAP_WIDTH, MAP_HEIGHT,
   DEFAULT_CRATER_RADIUS, applyOpToBitmap, collapseLips, PLAYER_HEIGHT,
   MOVE_BUDGET, WALK_SPEED, TURN_TIME_MS, TERMINAL_VELOCITY,
-  PROJECTILE_MAX_LIFETIME_FRAMES,
+  PROJECTILE_MAX_LIFETIME_FRAMES, RECONNECT_WINDOW_SECONDS,
   AIM_MIN_DEG, AIM_MAX_DEG,
   walkStep, settle, testCollisionY, pushOutOfWall, airborneHorizontal, computeTilt, Body,
 } from '@browserbond/shared';
@@ -37,6 +37,13 @@ class Player extends Schema {
   @type('number') tilt = 0;
   /** Aim angle in radians, measured RELATIVE TO THE CHASSIS, clamped to [AIM_MIN_DEG, AIM_MAX_DEG]. */
   @type('number') aimAngle = 0;
+  /**
+   * False while this player's connection is dropped and their reconnection
+   * window is still open. Synchronized so the opponent sees a character marked
+   * as reconnecting rather than one that is idle for no reason, or one that
+   * vanishes and comes back.
+   */
+  @type('boolean') connected = true;
 }
 
 class Projectile extends Schema {
@@ -100,7 +107,6 @@ export class GameRoom extends Room<GameState> {
   private terrainBitmap: Uint8Array = new Uint8Array(MAP_WIDTH * MAP_HEIGHT);
   private terrainOps: TerrainOp[] = [];
   private playerInputs: Map<string, { left: boolean; right: boolean; jump: boolean }> = new Map();
-  private clientLastActivity: Map<string, number> = new Map();
   private projectiles: GameProjectile[] = [];
   private pendingProjectiles: GameProjectile[] = [];
   private currentFrame: number = 0;
@@ -172,7 +178,6 @@ export class GameRoom extends Room<GameState> {
         return;
       }
       this.playerInputs.set(client.sessionId, data);
-      this.clientLastActivity.set(client.sessionId, Date.now());
     });
 
     this.onMessage('aimAngle', (client, data: { angle: number }) => {
@@ -192,7 +197,6 @@ export class GameRoom extends Room<GameState> {
     });
 
     this.onMessage('fire', (client, data: any) => {
-      this.clientLastActivity.set(client.sessionId, Date.now());
       const validation = this.validator.validateFireMessage(data, this.buildValidationGameState(), client.sessionId);
       if (!validation.valid) {
         console.warn(`[Fire] ${validation.reason} from ${client.sessionId}`);
@@ -270,28 +274,15 @@ export class GameRoom extends Room<GameState> {
   private updatePhysics() {
     this.currentFrame++;
 
-    // Remove inactive clients (disconnected but not yet cleaned up)
-    const now = Date.now();
-    for (const [clientId] of this.clientLastActivity) {
-      if (now - this.clientLastActivity.get(clientId)! > 30000) { // 30 seconds
-        this.clientLastActivity.delete(clientId);
-        if (this.state.players.has(clientId)) {
-          this.state.players.delete(clientId);
-          // Clean up player tracking state to prevent memory leaks
-          this.playerInputs.delete(clientId);
-          this.walkCarry.delete(clientId);
-          this.blockedNotified.delete(clientId);
-          this.airborneVxCarry.delete(clientId);
-          if (this.state.currentPlayerId === clientId) {
-            const playerIds = Array.from(this.state.players.keys());
-            if (playerIds[0]) {
-              this.beginTurn(playerIds[0]);
-            } else {
-              this.state.currentPlayerId = '';
-              this.state.turnEndsAt = 0;
-            }
-          }
-        }
+    // A player whose connection has dropped still holds the turn, and must not
+    // lose it to a clock they cannot see. Push the deadline along by exactly
+    // one tick so the turn is frozen, not extended: the moment they reconnect
+    // it resumes with the time they had left. onLeave owns actually giving up
+    // on them.
+    if (this.state.turnEndsAt > 0) {
+      const current = this.state.players.get(this.state.currentPlayerId);
+      if (current && !current.connected) {
+        this.state.turnEndsAt += SIMULATION_INTERVAL_MS;
       }
     }
 
@@ -705,24 +696,36 @@ export class GameRoom extends Room<GameState> {
       cause,
     });
 
+    // Any projectile fired by the dead player keeps flying, but the turn must
+    // move on to a survivor right away.
+    this.removePlayer(playerId);
+  }
+
+  /**
+   * The ONE permanent-departure path: death, a deliberate leave, and a
+   * reconnection window that ran out all end here.
+   *
+   * Every per-player map is released together, in one place, because they were
+   * previously released in three places that each forgot a different one.
+   * Anything keyed by session id belongs in this method.
+   */
+  private removePlayer(playerId: string) {
+    if (!this.state.players.has(playerId)) return;
+
     this.state.players.delete(playerId);
     this.playerInputs.delete(playerId);
-
-    // Clean up player tracking state to prevent memory leaks
     this.walkCarry.delete(playerId);
     this.blockedNotified.delete(playerId);
     this.airborneVxCarry.delete(playerId);
-    this.clientLastActivity.delete(playerId);
 
-    // Any projectile fired by the dead player keeps flying, but the turn must
-    // move on to a survivor right away.
-    if (this.state.currentPlayerId === playerId) {
-      const playerIds = Array.from(this.state.players.keys());
-      if (playerIds[0]) this.beginTurn(playerIds[0]);
-      else {
-        this.state.currentPlayerId = '';
-        this.state.turnEndsAt = 0;
-      }
+    if (this.state.currentPlayerId !== playerId) return;
+
+    const playerIds = Array.from(this.state.players.keys());
+    if (playerIds[0]) {
+      this.beginTurn(playerIds[0]);
+    } else {
+      this.state.currentPlayerId = '';
+      this.state.turnEndsAt = 0;
     }
   }
 
@@ -780,7 +783,6 @@ export class GameRoom extends Room<GameState> {
     player.health = 100;
 
     this.state.players.set(client.sessionId, player);
-    this.clientLastActivity.set(client.sessionId, Date.now());
 
     // Ensure currentPlayerId always points to a valid player, and that whoever
     // holds the turn actually has a budget and a deadline.
@@ -793,19 +795,40 @@ export class GameRoom extends Room<GameState> {
     client.send('terrainSync', { mapId: this.map.id, ops: this.terrainOps });
   }
 
-  onLeave(client: Client) {
-    this.clientLastActivity.delete(client.sessionId);
-    this.playerInputs.delete(client.sessionId);
-    this.walkCarry.delete(client.sessionId);
-    this.blockedNotified.delete(client.sessionId);
-    this.state.players.delete(client.sessionId);
+  /**
+   * The only place that decides whether a departure is temporary.
+   *
+   * Deliberately kept whole rather than spread across the room: the
+   * reconnection hooks are restructured in Colyseus 0.18 (#24), and the
+   * migration should be a rewire of this method, not a hunt.
+   */
+  async onLeave(client: Client, consented?: boolean) {
+    const player = this.state.players.get(client.sessionId);
+    if (!player) return;
 
-    if (this.state.players.size === 0) {
-      this.state.currentPlayerId = '';
-    } else if (!this.state.players.has(this.state.currentPlayerId)) {
-      // If current player left, switch to another valid player
-      const playerIds = Array.from(this.state.players.keys());
-      if (playerIds[0]) this.beginTurn(playerIds[0]);
+    // Whether or not they come back, they are not holding a key right now.
+    // Without this a player who disconnects mid-walk keeps walking.
+    this.playerInputs.delete(client.sessionId);
+
+    if (consented) {
+      // A deliberate leave is a decision, not an accident. Do not make the
+      // opponent wait out a window for someone who has already gone.
+      this.removePlayer(client.sessionId);
+      return;
+    }
+
+    player.connected = false;
+
+    try {
+      await this.allowReconnection(client, RECONNECT_WINDOW_SECONDS);
+      // Still in the match, still holding whatever turn and Movement Budget
+      // they had: nothing was torn down, so nothing needs restoring.
+      const rejoined = this.state.players.get(client.sessionId);
+      if (rejoined) rejoined.connected = true;
+    } catch {
+      // Window expired, or the room was disposed underneath us. removePlayer
+      // is idempotent, so a disposal race cannot pass the turn twice.
+      this.removePlayer(client.sessionId);
     }
   }
 }

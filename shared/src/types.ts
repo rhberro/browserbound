@@ -5,6 +5,8 @@ export interface PlayerState {
   health: number;
   currentlyAiming: boolean;
   facing: number; // 1 = direita, -1 = esquerda
+  /** False while this player is inside their reconnection window. */
+  connected: boolean;
 }
 
 export interface TurnState {
@@ -114,6 +116,18 @@ export const TERMINAL_VELOCITY = 12;
 
 /** A turn with no shot passes after this long. */
 export const TURN_TIME_MS = 30000;
+
+/**
+ * How long a dropped player keeps their character, turn and Movement Budget
+ * before the match gives up on them, in seconds.
+ *
+ * Sized against the disconnects worth surviving — a phone changing networks, a
+ * laptop waking from sleep — not against a player who has walked away. It is
+ * deliberately the same length as a turn: a reconnect that costs its owner
+ * their whole turn is already the worst case anyone should have to sit through,
+ * and the opponent is waiting the entire time.
+ */
+export const RECONNECT_WINDOW_SECONDS = 30;
 
 /**
  * Hard cap on how long a single projectile may stay in the air, in simulation

@@ -112,6 +112,12 @@ export class RendererAdapter {
       sprite.x = pos.x;
       sprite.y = pos.y;
 
+      // A character whose player is mid-reconnect must not read as idle. It
+      // stays on the field — the server is still holding its turn and budget —
+      // but pulses translucent so the opponent can tell the difference between
+      // someone thinking and someone whose connection dropped.
+      sprite.alpha = player.connected === false ? 0.35 + 0.25 * Math.sin(now / 200) : 1;
+
       // Update health bar
       const healthBar = sprite.getChildByName('healthBar') as PIXI.Graphics | undefined;
       if (healthBar) {
