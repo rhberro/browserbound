@@ -1,6 +1,7 @@
 import { computed, signal } from '@preact/signals';
 import type { GameState } from '../gameState';
 import type { AimState, InputAdapter } from '../adapters/InputAdapter';
+import { MOVE_BUDGET } from '@browserbond/shared';
 import { readLastShotValue, writeLastShotValue } from './lastShotStore';
 
 /**
@@ -20,6 +21,12 @@ export const selectedWeapon = signal(1);
 export const isMyTurn = signal(false);
 export const windSpeed = signal(0);
 export const windDirection = signal(0);
+
+/** Pixels of walking left this turn, and the budget a full turn starts with. */
+export const movementBudget = signal(0);
+export const movementBudgetMax = signal(MOVE_BUDGET);
+/** Whole seconds left in the current turn. */
+export const turnSeconds = signal(0);
 
 /**
  * False while our OWN connection is dropped and being retried.
@@ -42,6 +49,29 @@ export const lastPowerText = computed(() => `Last: ${lastPower.value.toFixed(0)}
 
 /** windSpeed is magnitude * 100 and magnitude maxes out at 0.5, so 0-50 maps to 0-100%. */
 export const windText = computed(() => `${Math.round((windSpeed.value / 50) * 100)}%`);
+
+/**
+ * Movement Budget as a percentage of a full turn's allowance, for the bar, and
+ * as a rounded pixel count for the readout.
+ */
+export const movementFillStyle = computed(
+  () => `width:${Math.max(0, Math.min(100, (movementBudget.value / movementBudgetMax.value) * 100))}%`
+);
+export const movementText = computed(() => `${Math.max(0, Math.round(movementBudget.value))}`);
+
+/**
+ * True when it is your turn and you have walked as far as you may.
+ *
+ * This is the state that used to read as a bug: the character simply stopped
+ * responding to movement input with nothing on screen to explain why.
+ */
+export const isOutOfMovement = computed(
+  () => isMyTurn.value && movementBudget.value <= 0
+);
+
+export const turnSecondsText = computed(() => `${turnSeconds.value}s`);
+/** The last five seconds of a turn, when the countdown should read as urgent. */
+export const isTurnEnding = computed(() => isMyTurn.value && turnSeconds.value > 0 && turnSeconds.value <= 5);
 
 /** Style and class strings, kept as signals so they bind to the element
  *  directly. The 60fps charge path therefore touches one attribute on one
@@ -90,7 +120,13 @@ export function syncHudSignals(gameState: GameState, inputAdapter: InputAdapter)
   if (turnState) {
     windSpeed.value = turnState.windSpeed;
     windDirection.value = turnState.windDirection;
+    // Already a remaining duration when it leaves the server, so no clock
+    // arithmetic happens here and client clock skew cannot affect it.
+    turnSeconds.value = turnState.turnSecondsRemaining;
   }
+
+  const me = gameState.getMyPlayer();
+  movementBudget.value = me ? me.movementBudget : 0;
 
   commitLastShot(aim);
 }

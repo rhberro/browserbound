@@ -316,7 +316,7 @@ export class GameState {
       currentPlayerId: state.currentPlayerId,
       windSpeed: state.windSpeed,
       windDirection: state.windDirection,
-      turnEndsAt: state.turnEndsAt,
+      turnSecondsRemaining: state.turnSecondsRemaining,
     };
   }
 
@@ -343,6 +343,13 @@ export class GameState {
 
   isCurrentPlayer(playerId: string): boolean {
     return this.room?.state.currentPlayerId === playerId;
+  }
+
+  /** The local session's own character, if it is still in the match. */
+  getMyPlayer(): PlayerView | null {
+    const myId = this.room?.sessionId;
+    if (!myId) return null;
+    return this.players.get(myId) ?? null;
   }
 
   isMyTurn(): boolean {

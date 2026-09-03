@@ -2,6 +2,8 @@ import { StatusPill } from './components/StatusPill';
 import { ConnectionBanner } from './components/ConnectionBanner';
 import { AngleControl } from './components/AngleControl';
 import { PowerBar } from './components/PowerBar';
+import { MovementBudget } from './components/MovementBudget';
+import { TurnClock } from './components/TurnClock';
 import { WeaponSelector } from './components/WeaponSelector';
 import { FireButton } from './components/FireButton';
 import { deckStateClass } from './signals';
@@ -27,6 +29,8 @@ export function HudRoot() {
           <div class="hud-panel pointer-events-auto flex flex-wrap items-end justify-center gap-x-8 gap-y-5 rounded-xl px-8 py-5 shadow-lg shadow-black/50">
             <AngleControl />
             <PowerBar />
+            <MovementBudget />
+            <TurnClock />
             <WeaponSelector />
             <FireButton />
           </div>

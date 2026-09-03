@@ -80,6 +80,11 @@ export class GameRoom extends Room<RoomState> {
   private walkCarry: Map<string, number> = new Map();
   /** Players already told they are against a wall, to debounce the cue. */
   private blockedNotified: Set<string> = new Set();
+  /**
+   * Epoch ms at which the current turn passes. Server-side only: clients get a
+   * remaining duration instead, because their clocks do not agree with this one.
+   */
+  private turnEndsAtMs: number = 0;
   /** Fractional vx accumulation for airborne horizontal stepping. */
   private airborneVxCarry: Map<string, number> = new Map();
   private map!: LoadedMap;
@@ -215,6 +220,27 @@ export class GameRoom extends Room<RoomState> {
     });
   }
 
+  /**
+   * Publish the turn clock as whole seconds remaining.
+   *
+   * Ceil, not floor, so the display reads "1" for the whole of the last second
+   * and reaches 0 exactly when the turn actually passes, rather than sitting on
+   * 0 for a second first.
+   */
+  private publishTurnClock(): void {
+    if (this.turnEndsAtMs <= 0) {
+      this.state.turnSecondsRemaining = 0;
+      return;
+    }
+    const msLeft = this.turnEndsAtMs - Date.now();
+    this.state.turnSecondsRemaining = Math.max(0, Math.ceil(msLeft / 1000));
+  }
+
+  private endTurnClock(): void {
+    this.turnEndsAtMs = 0;
+    this.state.turnSecondsRemaining = 0;
+  }
+
   /** Put a staged projectile into the world, where clients can see it. */
   private activate(proj: Projectile) {
     proj.activatedFrame = this.currentFrame;
@@ -236,12 +262,13 @@ export class GameRoom extends Room<RoomState> {
     // one tick so the turn is frozen, not extended: the moment they reconnect
     // it resumes with the time they had left. onLeave owns actually giving up
     // on them.
-    if (this.state.turnEndsAt > 0) {
+    if (this.turnEndsAtMs > 0) {
       const current = this.state.players.get(this.state.currentPlayerId);
       if (current && !current.connected) {
-        this.state.turnEndsAt += SIMULATION_INTERVAL_MS;
+        this.turnEndsAtMs += SIMULATION_INTERVAL_MS;
       }
     }
+    this.publishTurnClock();
 
     // Verificar se há projéteis pendentes que devem ser ativados
     this.pendingProjectiles = this.pendingProjectiles.filter((proj) => {
@@ -426,8 +453,8 @@ export class GameRoom extends Room<RoomState> {
     if (
       this.state.currentPlayerId &&
       this.nothingInFlight() &&
-      this.state.turnEndsAt > 0 &&
-      Date.now() > this.state.turnEndsAt
+      this.turnEndsAtMs > 0 &&
+      Date.now() > this.turnEndsAtMs
     ) {
       this.broadcast('turnTimeout', { playerId: this.state.currentPlayerId });
       this.advanceTurn();
@@ -598,7 +625,8 @@ export class GameRoom extends Room<RoomState> {
       // the client's HUD and aim line still read whatever the player had
       // dialled in — a silent disagreement about where the shot goes.
     }
-    this.state.turnEndsAt = Date.now() + TURN_TIME_MS;
+    this.turnEndsAtMs = Date.now() + TURN_TIME_MS;
+    this.publishTurnClock();
     this.walkCarry.set(playerId, 0);
     this.airborneVxCarry.set(playerId, 0);
     this.blockedNotified.delete(playerId);
@@ -612,7 +640,7 @@ export class GameRoom extends Room<RoomState> {
     const playerIds = Array.from(this.state.players.keys());
     if (playerIds.length === 0) {
       this.state.currentPlayerId = '';
-      this.state.turnEndsAt = 0;
+      this.endTurnClock();
       return;
     }
 
@@ -685,7 +713,7 @@ export class GameRoom extends Room<RoomState> {
       this.beginTurn(playerIds[0]);
     } else {
       this.state.currentPlayerId = '';
-      this.state.turnEndsAt = 0;
+      this.endTurnClock();
     }
   }
 

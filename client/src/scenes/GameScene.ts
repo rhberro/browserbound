@@ -54,12 +54,6 @@ export class GameScene {
     mountHud(this.inputAdapter);
   }
 
-  private getMyPlayer() {
-    const myId = this.gameState.getRoomSessionId();
-    if (!myId) return null;
-    return this.gameState.players.get(myId) || null;
-  }
-
   update(deltaMS: number) {
     // Update input state
     this.inputAdapter.update(deltaMS);
@@ -107,7 +101,7 @@ export class GameScene {
 
   render() {
     const aimState = this.inputAdapter.getAimState();
-    const myPlayer = this.getMyPlayer();
+    const myPlayer = this.gameState.getMyPlayer();
 
     // The aim line is the only world-frame feedback the player gets (ADR
     // 0003), so it is drawn for the whole of your turn — not just while the

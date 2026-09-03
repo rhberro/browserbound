@@ -75,8 +75,20 @@ export class RoomState extends Schema {
   @type('string') currentPlayerId = '';
   @type('number') windSpeed = 5;
   @type('number') windDirection = 0;
-  /** Epoch ms at which the current turn passes if nobody fires. */
-  @type('number') turnEndsAt = 0;
+  /**
+   * Whole seconds left in the current turn; 0 when no turn is running.
+   *
+   * A REMAINING DURATION, not a deadline. This was an absolute server
+   * timestamp, which requires the client's clock to agree with the server's —
+   * it does not, and a countdown computed from a skewed clock is wrong by the
+   * skew, permanently. A duration is correct on any clock.
+   *
+   * Whole seconds rather than milliseconds because the schema only patches a
+   * field when its value actually changes: seconds means one patch per second,
+   * where milliseconds would mean one every tick for a number nobody reads at
+   * that resolution.
+   */
+  @type('number') turnSecondsRemaining = 0;
   @type({ map: Player }) players = new MapSchema<Player>();
   /** Projectiles currently in flight. Empty between shots. */
   @type({ map: Projectile }) projectiles = new MapSchema<Projectile>();
@@ -110,5 +122,5 @@ export type ProjectileView = Pick<Projectile, 'x' | 'y'>;
 /** The client's picture of the room, minus the maps it reads separately. */
 export type TurnView = Pick<
   RoomState,
-  'currentPlayerId' | 'windSpeed' | 'windDirection' | 'turnEndsAt'
+  'currentPlayerId' | 'windSpeed' | 'windDirection' | 'turnSecondsRemaining'
 >;
