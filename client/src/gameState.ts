@@ -88,12 +88,20 @@ export class GameState {
   constructor() {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
 
-    // In development (localhost), connect to port 3002 where the server runs
-    // In production, connect to the current host
     let url: string;
-    if (window.location.hostname === 'localhost') {
+    // Allow server URL to be overridden via environment variable or query parameter
+    const envServerUrl = import.meta.env.VITE_SERVER_URL;
+    const queryParam = new URLSearchParams(window.location.search).get('serverUrl');
+
+    if (queryParam) {
+      url = queryParam;
+    } else if (envServerUrl) {
+      url = envServerUrl;
+    } else if (window.location.hostname === 'localhost') {
+      // In development (localhost), connect to port 3002 where the server runs
       url = `${protocol}//localhost:3002`;
     } else {
+      // In production, connect to the current host
       url = `${protocol}//${window.location.host}`;
     }
 

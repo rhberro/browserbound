@@ -21,6 +21,10 @@ const server = defineServer({
   transport: new WebSocketTransport({
     pingInterval: 5000,
     pingMaxRetries: 3,
+    cors: {
+      origin: '*',
+      credentials: true,
+    },
   }),
   rooms: {
     game: defineRoom(GameRoom, { enableRealtimeListing: true }),
