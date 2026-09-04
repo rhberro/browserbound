@@ -105,14 +105,15 @@ export class GameRoom extends Room {
         throw new Error('Invalid JWT: missing sub claim');
       }
 
-      // Fetch display name from Supabase
-      const displayName = await fetchDisplayName(sub);
+      // Fetch or create display name from Supabase profiles
+      const email = verified.payload.email as string;
+      const displayName = await fetchDisplayName(sub, email);
 
       // Return auth data that becomes client.auth in onJoin
       return {
         userId: sub,
         displayName,
-        email: verified.payload.email as string,
+        email,
       };
     } catch (error) {
       console.error('JWT verification failed:', error);
