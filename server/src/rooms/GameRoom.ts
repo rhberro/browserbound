@@ -63,17 +63,13 @@ interface AuthPayload {
 
 export class GameRoom extends Room {
   static async onAuth(token: string) {
-    try {
-      // In development mode, allow unauthenticated access
-      if (process.env.NODE_ENV === 'development' && !token) {
-        console.warn('⚠️  Development mode: allowing unauthenticated access');
-        return {
-          userId: 'dev-user-' + Math.random().toString(36).substring(7),
-          displayName: 'Dev Player',
-          email: 'dev@localhost',
-        };
-      }
+    console.log('🔍 DEBUG: onAuth called');
+    console.log('🔍 DEBUG: token type:', typeof token);
+    console.log('🔍 DEBUG: token value:', token);
+    console.log('🔍 DEBUG: arguments count:', arguments.length);
+    console.log('🔍 DEBUG: all arguments:', Array.from(arguments));
 
+    try {
       if (!token) {
         throw new Error('No authentication token provided');
       }
