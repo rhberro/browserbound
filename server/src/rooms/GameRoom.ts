@@ -236,10 +236,12 @@ export class GameRoom extends Room {
     });
 
     this.onMessage('setReady', (client, data: { ready: boolean }) => {
-      if (this.state.matchPhase !== 'lobby') return;
-      const seat = this.state.seats.get(client.sessionId);
-      if (!seat || seat.seatIndex < 0) return; // Must have a seat to ready up
-
+      const validation = this.validator.validateSetReadyMessage(data, this.buildValidationGameState(), client.sessionId);
+      if (!validation.valid) {
+        console.warn(`[SetReady] ${validation.reason} from ${client.sessionId}`);
+        return;
+      }
+      const seat = this.state.seats.get(client.sessionId)!;
       seat.ready = data.ready;
     });
 
@@ -1161,8 +1163,10 @@ export class GameRoom extends Room {
 
   private buildValidationGameState(): {
     currentPlayerId: string;
+    matchPhase: RoomState['matchPhase'];
     players: Map<string, { health: number }>;
     projectiles: Map<string, { x: number; y: number; firedBy: string }>;
+    seats: Map<string, { seatIndex: number }>;
   } {
     // Include both active and pending projectiles to prevent double-firing within single frame
     const allProjectiles: Projectile[] = [
@@ -1175,10 +1179,15 @@ export class GameRoom extends Room {
     const playersMap = new Map(
       Array.from(this.state.players.entries()).map(([id, player]) => [id, { health: player.health }])
     );
+    const seatsMap = new Map(
+      Array.from(this.state.seats.entries()).map(([id, seat]) => [id, { seatIndex: seat.seatIndex }])
+    );
     return {
       currentPlayerId: this.state.currentPlayerId,
+      matchPhase: this.state.matchPhase,
       players: playersMap,
       projectiles: projectilesMap,
+      seats: seatsMap,
     };
   }
 

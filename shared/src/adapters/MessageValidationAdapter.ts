@@ -7,6 +7,7 @@
 
 import { MAP_WIDTH, MAP_HEIGHT } from '../terrain';
 import { WEAPONS } from './WeaponConfigAdapter';
+import { MatchPhase } from '../schema';
 
 export interface ValidationResult {
   valid: boolean;
@@ -48,10 +49,16 @@ interface CollisionMessage {
   y: number;
 }
 
+interface SetReadyMessage {
+  ready: boolean;
+}
+
 interface GameStateForValidation {
   currentPlayerId: string;
+  matchPhase: MatchPhase;
   players: Map<string, { health: number }>;
   projectiles: Map<string, { x: number; y: number; firedBy?: string }>;
+  seats: Map<string, { seatIndex: number }>;
 }
 
 /**
@@ -170,7 +177,22 @@ export class MessageValidationAdapter {
       return { valid: false, reason: 'player is dead' };
     }
 
-    // 3. Inputs must be boolean
+    // 3. Player must be in current turn. The client already gates sending
+    //    `move` to its own turn, so this rejects a malicious or buggy client
+    //    only — never a legitimate one.
+    //
+    //    Deliberately NOT paired with a movement-budget check here: `move`
+    //    carries HELD INPUT STATE, sent roughly every 50ms for the player's
+    //    entire turn regardless of remaining budget, so running out of
+    //    budget mid-hold is a normal steady state, not something to reject.
+    //    updatePhysics's own walk-step gate (`movementBudget > 0`) is where
+    //    budget actually governs motion; duplicating it here would reject —
+    //    and log a warning for — perfectly ordinary play.
+    if (gameState.currentPlayerId !== playerId) {
+      return { valid: false, reason: 'player not in current turn' };
+    }
+
+    // 4. Inputs must be boolean
     if (typeof message.left !== 'boolean') {
       return { valid: false, reason: 'inputs must be boolean' };
     }
@@ -245,6 +267,35 @@ export class MessageValidationAdapter {
     const validTypes = ['player', 'terrain', 'miss'];
     if (!validTypes.includes(message.type)) {
       return { valid: false, reason: `unknown collision type ${message.type}` };
+    }
+
+    return { valid: true };
+  }
+
+  /**
+   * Ready requires the lobby phase (a mid-match `setReady` can't mean
+   * anything — matches don't re-ready) and a claimed seat (an unclaimed
+   * `seatIndex` of -1 is not a state anyone should be able to ready up in).
+   */
+  validateSetReadyMessage(
+    message: SetReadyMessage,
+    gameState: GameStateForValidation,
+    playerId: string
+  ): ValidationResult {
+    if (!isObject(message)) {
+      return { valid: false, reason: 'setReady message is not an object' };
+    }
+    if (typeof message.ready !== 'boolean') {
+      return { valid: false, reason: 'ready must be a boolean' };
+    }
+
+    if (gameState.matchPhase !== 'lobby') {
+      return { valid: false, reason: 'not in lobby phase' };
+    }
+
+    const seat = gameState.seats.get(playerId);
+    if (!seat || seat.seatIndex < 0) {
+      return { valid: false, reason: 'no seat claimed' };
     }
 
     return { valid: true };
