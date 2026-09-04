@@ -41,22 +41,22 @@ export class GameScene {
       // A fresh map means a fresh match: debris from the last impact must not
       // carry into it.
       this.rendererAdapter.clearParticles();
-      void this.rendererAdapter.loadMap(mapId);
+      return this.rendererAdapter.loadMap(mapId);
     });
     this.gameState.setOnTerrainOp((op) => this.rendererAdapter.applyTerrainOp(op));
 
-    // Process any pending terrain data that arrived before callbacks were set
-    // Use setTimeout to avoid calling clearParticles during construction
-    if (this.gameState.pendingMapId) {
-      setTimeout(() => {
-        this.gameState.onMapLoad?.(this.gameState.pendingMapId!);
-        this.gameState.pendingMapId = null;
-      }, 0);
-    }
-    for (const op of this.gameState.pendingTerrainOps) {
-      this.gameState.onTerrainOp?.(op);
-    }
-    this.gameState.pendingTerrainOps = [];
+    // Release any terrain news that arrived over the wire before the
+    // callbacks above were registered. Awaits the map load before a single
+    // op replays, so a queued crater can never land on a still-loading map.
+    //
+    // Not awaited here (constructors can't be async) — fired and left to
+    // run. If a map is pending, this calls `onMapLoad` synchronously as part
+    // of this expression, which runs `clearParticles()` and starts
+    // `loadMap()` within this constructor's own call stack. That is safe:
+    // `rendererAdapter` (line 35, above) is fully constructed by this point,
+    // so there is nothing later in this constructor for `clearParticles` to
+    // race against.
+    void this.gameState.replayPendingTerrain();
 
     // Our own connection state drives the banner. Without this the dropped
     // player sees a game that has simply stopped, with no way to tell a retry

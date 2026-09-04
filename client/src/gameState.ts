@@ -79,11 +79,24 @@ export class GameState {
    * Called with the map the room is playing before any of its terrain ops.
    * The base terrain is a PNG, not an op (ADR 0002) — `terrainSync` names the
    * map and carries destruction since it loaded.
+   *
+   * May return a Promise: `replayPendingTerrain` awaits it before draining
+   * queued ops, so a crater from the pending backlog can never land on a
+   * texture that has not finished loading.
    */
-  public onMapLoad: ((mapId: string) => void) | null = null;
+  public onMapLoad: ((mapId: string) => void | Promise<void>) | null = null;
   private pendingMapId: string | null = null;
   public onPlayerDied: ((playerId: string, x: number, y: number) => void) | null = null;
   private pendingTerrainOps: TerrainOp[] = [];
+  /**
+   * True only for the span of `replayPendingTerrain`'s awaited map load. The
+   * message handlers below check this so a live `terrainSync`/`terrainOp`
+   * that arrives during that await queues behind the backlog instead of
+   * jumping ahead of it — the one gap a plain "is the callback registered?"
+   * check can't close, because the callback IS registered for that entire
+   * span.
+   */
+  private replayingTerrain = false;
 
   constructor() {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -416,14 +429,19 @@ export class GameState {
     this.room.onMessage('terrainSync', (data: { mapId?: string; ops: TerrainOp[] }) => {
       // Map first, ops second: the renderer holds its op queue until the map
       // has been painted, so craters land on top of the ground, not under it.
+      //
+      // Also queued (not applied live) while `replayPendingTerrain` is
+      // awaiting a queued map load: `onTerrainOp`/`onMapLoad` are already
+      // registered by then, so without this a live op could apply ahead of
+      // the still-awaited backlog it was queued behind.
       if (data.mapId) {
-        if (this.onMapLoad) {
+        if (this.onMapLoad && !this.replayingTerrain) {
           this.onMapLoad(data.mapId);
         } else {
           this.pendingMapId = data.mapId;
         }
       }
-      if (this.onTerrainOp) {
+      if (this.onTerrainOp && !this.replayingTerrain) {
         for (const op of data.ops) {
           this.onTerrainOp(op);
         }
@@ -438,7 +456,7 @@ export class GameState {
       // match already in progress, history rather than news, and holding it
       // back would only draw the map wrong for a moment on join.
       this.shotClock.defer(performance.now(), () => {
-        if (this.onTerrainOp) {
+        if (this.onTerrainOp && !this.replayingTerrain) {
           this.onTerrainOp(op);
         } else {
           this.pendingTerrainOps.push(op);
@@ -473,24 +491,61 @@ export class GameState {
   }
 
   /**
-   * Register the map-load handler. Call this BEFORE `setOnTerrainOp`: if a
-   * `terrainSync` already arrived, both replay their backlog on registration,
-   * and the map has to be requested before the craters queue behind it.
+   * Register the map-load handler.
+   *
+   * Pure registration — it does NOT replay a backlog. A `terrainSync` that
+   * arrived before this was called stays queued in `pendingMapId` until
+   * `replayPendingTerrain` is told to release it, so the caller controls
+   * exactly when that replay happens relative to registering `onTerrainOp`
+   * too, instead of it happening as a side effect of registration order.
    */
-  setOnMapLoad(callback: (mapId: string) => void) {
+  setOnMapLoad(callback: (mapId: string) => void | Promise<void>) {
     this.onMapLoad = callback;
-    if (this.pendingMapId) {
-      callback(this.pendingMapId);
-      this.pendingMapId = null;
-    }
   }
 
+  /** Register the terrain-op handler. Pure registration — see setOnMapLoad. */
   setOnTerrainOp(callback: (op: TerrainOp) => void) {
     this.onTerrainOp = callback;
-    for (const op of this.pendingTerrainOps) {
-      callback(op);
+  }
+
+  /**
+   * Release whatever terrain news arrived over the wire before `onMapLoad`
+   * and `onTerrainOp` were registered — the backlog `terrainSync`/`terrainOp`
+   * queue into `pendingMapId`/`pendingTerrainOps` when there is no callback
+   * yet to hand them to.
+   *
+   * The map is awaited before a single op is replayed. Nothing else in this
+   * class enforces that ordering: `onMapLoad`'s callback can be async (it
+   * wraps a texture load), and calling it without awaiting — as this used to
+   * — meant a queued crater could apply to a texture that had not finished
+   * loading.
+   *
+   * Drains in a loop, not one fixed pass: `replayingTerrain` redirects any
+   * live op that arrives during the awaited map load back into
+   * `pendingTerrainOps` rather than letting it apply ahead of the backlog, so
+   * this has to keep draining until nothing more got queued behind it.
+   */
+  async replayPendingTerrain(): Promise<void> {
+    if (this.pendingMapId) {
+      const mapId = this.pendingMapId;
+      this.pendingMapId = null;
+      this.replayingTerrain = true;
+      // A failed load (404, network drop) must not leave `replayingTerrain`
+      // stuck true — every terrainSync/terrainOp for the rest of the match
+      // would queue behind it forever instead of ever applying live.
+      try {
+        await this.onMapLoad?.(mapId);
+      } finally {
+        this.replayingTerrain = false;
+      }
     }
-    this.pendingTerrainOps = [];
+    while (this.pendingTerrainOps.length > 0) {
+      const ops = this.pendingTerrainOps;
+      this.pendingTerrainOps = [];
+      for (const op of ops) {
+        this.onTerrainOp?.(op);
+      }
+    }
   }
 
   isCurrentPlayer(playerId: string): boolean {
