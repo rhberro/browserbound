@@ -1195,14 +1195,13 @@ export class GameRoom extends Room {
     // Create a seat for this player
     const seat = new Seat();
     seat.sessionId = client.sessionId;
-    seat.userId = options?.userId || '';
-    // The resolver-backed value from onAuth, NOT options.displayName — that
-    // would be the client's own unverified claim. onAuth already resolved a
-    // real display name (DB profile, then email, then userId, then a
-    // sessionId fallback); this is the one place that value is meant to
-    // land. `client.auth` is guaranteed here because onAuth runs before
-    // onJoin for every connection — the OR is defense against `any`-typed
-    // auth data, not an expected path.
+    // client.auth is the verified JWT `sub`/displayName from onAuth, NOT
+    // options.userId/options.displayName — those are the client's own
+    // unverified claims, and trusting them lets a client spoof another
+    // user's identity in a seat. `client.auth` is guaranteed here because
+    // onAuth runs before onJoin for every connection — the OR is defense
+    // against `any`-typed auth data, not an expected path.
+    seat.userId = client.auth?.userId || '';
     seat.displayName = client.auth?.displayName || `Player ${client.sessionId.substring(0, 4)}`;
     seat.seatIndex = -1; // Start unclaimed
     seat.ready = false;
