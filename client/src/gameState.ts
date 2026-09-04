@@ -168,7 +168,13 @@ export class GameState {
       }
     }
     if (!this.room) {
-      this.room = await this.client.joinOrCreate('game');
+      // Get Supabase session for authentication
+      const { data: { session } } = await (await import('./supabase')).supabase.auth.getSession();
+      if (!session) throw new Error('Not authenticated');
+
+      this.room = await this.client.joinOrCreate('game', {
+        auth: session.access_token,
+      });
     }
     this.rememberToken(this.room.reconnectionToken);
     this.watchForDisconnect();
