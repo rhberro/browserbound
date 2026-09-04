@@ -62,14 +62,18 @@ interface AuthPayload {
 }
 
 export class GameRoom extends Room {
-  static async onAuth(token: string) {
-    console.log('🔍 DEBUG: onAuth called');
-    console.log('🔍 DEBUG: token type:', typeof token);
-    console.log('🔍 DEBUG: token value:', token);
-    console.log('🔍 DEBUG: arguments count:', arguments.length);
-    console.log('🔍 DEBUG: all arguments:', Array.from(arguments));
-
+  /**
+   * Colyseus 0.18 onAuth: Validates client JWT token before room join.
+   *
+   * Called with: (client, options, context)
+   * - options.auth contains the JWT token from client
+   * - Supabase uses ES256 (elliptic curve) signing, not HS256
+   */
+  async onAuth(client: any, options: any, context: any) {
     try {
+      // Extract token from options.auth (not passed as first parameter)
+      const token = options?.auth;
+
       if (!token) {
         throw new Error('No authentication token provided');
       }
@@ -79,28 +83,31 @@ export class GameRoom extends Room {
         throw new Error('SUPABASE_JWT_SECRET not configured');
       }
 
-      // Supabase secret format: sb_secret_<base64-encoded-value>
-      // Extract the actual base64 part and decode it
+      // Supabase JWT secret format: sb_secret_<base64-encoded-value>
+      // For ES256 verification, we use the secret as-is
       let secretBytes: Uint8Array;
 
       if (secretString.startsWith('sb_secret_')) {
-        // Decode the base64 part after "sb_secret_"
+        // Extract and base64-decode the secret part
         const base64Part = secretString.substring('sb_secret_'.length);
         secretBytes = new Uint8Array(Buffer.from(base64Part, 'base64'));
       } else {
-        // Fallback: treat the entire string as the secret
+        // Fallback: treat as raw secret
         secretBytes = new TextEncoder().encode(secretString);
       }
 
+      // jwtVerify handles ES256 automatically based on JWT header
       const verified = await jwtVerify(token, secretBytes);
       const sub = (verified.payload.sub as string) || '';
 
       if (!sub) {
-        throw new Error('Invalid JWT: missing sub');
+        throw new Error('Invalid JWT: missing sub claim');
       }
 
+      // Fetch display name from Supabase
       const displayName = await fetchDisplayName(sub);
 
+      // Return auth data that becomes client.auth in onJoin
       return {
         userId: sub,
         displayName,
