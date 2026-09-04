@@ -2,7 +2,7 @@ import { defineServer, defineRoom, LobbyRoom } from 'colyseus';
 import { WebSocketTransport } from '@colyseus/ws-transport';
 import { GameRoom } from './rooms/GameRoom';
 
-const PORT = 3002;
+const PORT = parseInt(process.env.PORT || '3002');
 
 /**
  * 0.17 replaced constructing a Server and registering rooms against it with a
