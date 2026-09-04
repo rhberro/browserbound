@@ -1,4 +1,6 @@
-import { computed, signal } from '@preact/signals';
+import { computed, signal, effect } from '@preact/signals';
+import { sceneManager } from '../scenes/SceneManager';
+import type { MatchPhase } from '@browserbond/shared';
 import type { GameState } from '../gameState';
 import type { AimState, InputAdapter } from '../adapters/InputAdapter';
 import { MOVE_STEPS, worldAimDeg } from '@browserbond/shared';
@@ -32,6 +34,7 @@ export const turnSeconds = signal(0);
 /** Match outcome. `matchEnded` gates the whole result overlay. */
 export const matchEnded = signal(false);
 export const winningTeamId = signal(-1);
+export const matchPhase = signal<MatchPhase>('lobby');
 export const mySessionId = signal('');
 
 /** One player in acting order, for the Delay readout. */
@@ -205,6 +208,7 @@ export function syncHudSignals(gameState: GameState, inputAdapter: InputAdapter)
     // Already a remaining duration when it leaves the server, so no clock
     // arithmetic happens here and client clock skew cannot affect it.
     turnSeconds.value = turnState.turnSecondsRemaining;
+    matchPhase.value = turnState.matchPhase;
   }
 
   nowMs.value = Date.now();
@@ -237,6 +241,11 @@ export function syncHudSignals(gameState: GameState, inputAdapter: InputAdapter)
 
   commitLastShot(aim, displayAngleDeg);
 }
+
+// Wire scene transitions to match phase changes
+effect(() => {
+  sceneManager.onMatchPhaseChange(matchPhase.value);
+});
 
 /** The deck dims while the opponent plays. Inertness itself comes from the
  *  `disabled` attribute on each control — `pointer-events: none` here would be

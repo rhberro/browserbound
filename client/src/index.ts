@@ -23,7 +23,7 @@ export function getGameState(): GameState {
   return gameState;
 }
 
-async function initializeGame() {
+async function initializeApp() {
   if (app) return;
 
   app = new PIXI.Application();
@@ -40,11 +40,7 @@ async function initializeGame() {
   if (!container) throw new Error('No container element');
   container.appendChild(app.canvas);
 
-  gameState = new GameState();
-  // Don't connect here - only connect when actually joining/creating a room
-
-  gameScene = new GameScene(app, gameState);
-
+  // Create the game loop, but it will be idle until GameScene is created
   const tick = () => {
     if (gameScene && app) {
       gameScene.update(app.ticker.deltaMS);
@@ -62,6 +58,25 @@ async function initializeGame() {
     }
   };
   window.addEventListener('pagehide', teardown, { once: true });
+}
+
+export function createGameScene() {
+  if (!app || !gameState) {
+    console.error('App or GameState not initialized');
+    return;
+  }
+  if (gameScene) {
+    console.warn('GameScene already exists');
+    return;
+  }
+  gameScene = new GameScene(app, gameState);
+}
+
+export function destroyGameScene() {
+  if (gameScene) {
+    gameScene.destroy();
+    gameScene = null;
+  }
 }
 
 async function main() {
@@ -102,8 +117,8 @@ async function checkAuth() {
     return;
   }
 
-  // Auth successful, go to main menu
-  await initializeGame();
+  // Auth successful, initialize app and go to main menu
+  await initializeApp();
   sceneManager.go('mainMenu', {
     onNavigate: (scene: string) => {
       sceneManager.go(scene as any, {
