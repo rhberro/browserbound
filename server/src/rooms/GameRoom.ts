@@ -510,6 +510,9 @@ export class GameRoom extends Room {
     this.state.matchPhase = 'playing';
     this.matchStarted = true;
 
+    // Broadcast the terrain state to all clients so they can render the map
+    this.broadcast('terrainSync', { mapId: this.map.id, ops: this.terrainOps });
+
     const first = this.lowestDelayPlayerId();
     if (first) this.beginTurn(first);
   }

@@ -45,6 +45,19 @@ export class GameScene {
     });
     this.gameState.setOnTerrainOp((op) => this.rendererAdapter.applyTerrainOp(op));
 
+    // Process any pending terrain data that arrived before callbacks were set
+    // Use setTimeout to avoid calling clearParticles during construction
+    if (this.gameState.pendingMapId) {
+      setTimeout(() => {
+        this.gameState.onMapLoad?.(this.gameState.pendingMapId!);
+        this.gameState.pendingMapId = null;
+      }, 0);
+    }
+    for (const op of this.gameState.pendingTerrainOps) {
+      this.gameState.onTerrainOp?.(op);
+    }
+    this.gameState.pendingTerrainOps = [];
+
     // Our own connection state drives the banner. Without this the dropped
     // player sees a game that has simply stopped, with no way to tell a retry
     // in progress from a hang.

@@ -98,8 +98,8 @@ export class GameState {
     } else if (envServerUrl) {
       url = envServerUrl;
     } else if (window.location.hostname === 'localhost') {
-      // In development (localhost), connect to port 3002 where the server runs
-      url = `${protocol}//localhost:3002`;
+      // In development (localhost), connect to port 8080 where the server runs
+      url = `${protocol}//localhost:8080`;
     } else {
       // In production, connect to the current host
       url = `${protocol}//${window.location.host}`;
@@ -207,6 +207,19 @@ export class GameState {
     // Initialize turnState immediately from current state (don't wait for onChange)
     this.updateTurnState();
 
+    // Pick up any existing players that were already in the state
+    if (this.room.state.players) {
+      for (const [key, player] of this.room.state.players) {
+        this.players.set(key, snapshot(player));
+        this.trackEntity(
+          key,
+          $(player).onChange(() => {
+            this.players.set(key, snapshot(player));
+          })
+        );
+      }
+    }
+
     track(
       $(this.room.state).players.onAdd((player: Player, key: string) => {
         this.players.set(key, snapshot(player));
@@ -290,6 +303,14 @@ export class GameState {
     // everything the room still holds and repopulates them from state.
     this.projectiles.clear();
     this.players.clear();
+
+    // Clear pending terrain data from previous match so it doesn't bleed into rematch
+    this.pendingMapId = null;
+    this.pendingTerrainOps = [];
+
+    // Clear callbacks so old scene's methods aren't called on new terrain state
+    this.onMapLoad = null;
+    this.onTerrainOp = null;
   }
 
   /**
@@ -542,7 +563,7 @@ export class GameState {
     const { data: { session } } = await (await import('./supabase')).supabase.auth.getSession();
     if (!session) throw new Error('Not authenticated');
 
-    this.room = await this.client.joinById('game', roomId, {
+    this.room = await this.client.joinById(roomId, {
       userId: session.user.id,
       displayName: session.user.user_metadata?.display_name || session.user.email,
       auth: session.access_token,
@@ -591,19 +612,7 @@ export class GameState {
   private setupRoomHandlers(): void {
     if (!this.room) return;
 
-    this.room.onMessage('collision', (message: any) => {
-      this.collision = { ...message, time: Date.now(), x: message.x || 0, y: message.y || 0, removedPixels: message.removedPixels || 0 };
-    });
-
-    this.room.onMessage('terrainSync', (message: any) => {
-      this.pendingMapId = message.mapId;
-      this.pendingTerrainOps = message.ops || [];
-    });
-
-    this.room.onMessage('blocked', () => {
-      if (this.onBlocked) {
-        this.onBlocked();
-      }
-    });
+    this.bindStateListeners();
+    this.registerMessageHandlers();
   }
 }

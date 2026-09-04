@@ -2,6 +2,7 @@ import { h } from 'preact';
 import { useState, useEffect } from 'preact/hooks';
 import { getGameState } from '../../index';
 import { Seat, teamOfSeat } from '@browserbond/shared';
+import { matchPhase } from '../signals';
 
 interface LobbyProps {
   onNavigate: (scene: string) => void;
@@ -38,6 +39,11 @@ export function Lobby({ onNavigate }: LobbyProps) {
       setTeamCount(state.teamCount || 2);
       setTeamSize(state.teamSize || 1);
       setIsHost(sessionId === state.hostSessionId);
+
+      // Update matchPhase signal so scene transition effect fires
+      if (state.matchPhase && matchPhase.value !== state.matchPhase) {
+        matchPhase.value = state.matchPhase;
+      }
 
       const seatArray: SeatUI[] = Array.from(state.seats?.values() || []).map((seat: any) => ({
         seatIndex: seat.seatIndex,
