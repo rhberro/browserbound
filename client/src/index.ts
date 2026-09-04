@@ -10,6 +10,7 @@ import { CreateServer } from './ui/screens/CreateServer';
 import { Lobby } from './ui/screens/Lobby';
 import { GameState } from './gameState';
 import { GameScene } from './scenes/GameScene';
+import { setupSceneTransitionEffect } from './ui/signals';
 
 let app: PIXI.Application | null = null;
 let gameState: GameState | null = null;
@@ -81,6 +82,9 @@ export function destroyGameScene() {
 
 async function main() {
   try {
+    // Register game scene callbacks
+    sceneManager.setGameSceneCallbacks(createGameScene, destroyGameScene);
+
     // Register all screens
     sceneManager.registerScene('splash', Splash);
     sceneManager.registerScene('auth', LoginSignup);
@@ -89,6 +93,9 @@ async function main() {
     sceneManager.registerScene('findServers', FindServers);
     sceneManager.registerScene('createServer', CreateServer);
     sceneManager.registerScene('lobby', Lobby);
+
+    // Set up scene transition effect after sceneManager is ready
+    setupSceneTransitionEffect();
 
     // Show splash screen first
     sceneManager.go('splash', {

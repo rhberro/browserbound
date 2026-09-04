@@ -21,9 +21,16 @@ const scenes: Record<Exclude<SceneName, 'game'>, SceneComponent> = {
 
 export class SceneManager {
   private currentScene: SceneName | null = null;
+  private createGameScene: (() => void) | null = null;
+  private destroyGameScene: (() => void) | null = null;
 
   registerScene(name: Exclude<SceneName, 'game'>, component: FunctionComponent<any>, props?: Record<string, any>) {
     scenes[name] = { component, props };
+  }
+
+  setGameSceneCallbacks(create: () => void, destroy: () => void) {
+    this.createGameScene = create;
+    this.destroyGameScene = destroy;
   }
 
   go(sceneName: SceneName, params?: Record<string, any>) {
@@ -31,8 +38,9 @@ export class SceneManager {
     if (sceneName === 'game') {
       if (this.currentScene !== 'game') {
         unmountHud();
-        const { createGameScene } = require('../index');
-        createGameScene();
+        if (this.createGameScene) {
+          this.createGameScene();
+        }
       }
       this.currentScene = sceneName;
       return;
@@ -40,8 +48,9 @@ export class SceneManager {
 
     // For UI scenes, unmount game scene if active
     if (this.currentScene === 'game') {
-      const { destroyGameScene } = require('../index');
-      destroyGameScene();
+      if (this.destroyGameScene) {
+        this.destroyGameScene();
+      }
     }
 
     // Unmount previous UI scene

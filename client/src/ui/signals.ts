@@ -243,9 +243,12 @@ export function syncHudSignals(gameState: GameState, inputAdapter: InputAdapter)
 }
 
 // Wire scene transitions to match phase changes
-effect(() => {
-  sceneManager.onMatchPhaseChange(matchPhase.value);
-});
+// This is called after sceneManager is initialized to avoid circular dependencies
+export function setupSceneTransitionEffect() {
+  effect(() => {
+    sceneManager.onMatchPhaseChange(matchPhase.value);
+  });
+}
 
 /** The deck dims while the opponent plays. Inertness itself comes from the
  *  `disabled` attribute on each control — `pointer-events: none` here would be
