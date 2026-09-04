@@ -10,6 +10,16 @@ if (!supabaseUrl || !supabaseServiceRoleKey) {
 const supabaseAdmin = createClient(supabaseUrl, supabaseServiceRoleKey);
 
 export async function fetchDisplayName(userId: string, email?: string): Promise<string> {
+  // If service role key is not configured, skip profile operations
+  if (!supabaseServiceRoleKey || supabaseServiceRoleKey.includes('invalid')) {
+    if (email) {
+      const displayName = email.split('@')[0];
+      console.log(`ℹ️  Using email (${displayName}) as display name for ${userId}`);
+      return displayName;
+    }
+    return userId;
+  }
+
   try {
     // Try to fetch existing profile
     const { data, error } = await supabaseAdmin
@@ -22,40 +32,18 @@ export async function fetchDisplayName(userId: string, email?: string): Promise<
       return data.display_name;
     }
 
-    // If profile doesn't exist or has no display name, try to create one
+    // If profile doesn't exist, use email prefix as fallback
     if (email) {
-      const displayName = email.split('@')[0]; // Use email prefix as display name
-
-      try {
-        // Try to insert a new profile if it doesn't exist
-        const { error: insertError } = await supabaseAdmin
-          .from('profiles')
-          .insert([
-            {
-              id: userId,
-              display_name: displayName,
-              email: email,
-            }
-          ])
-          .select()
-          .single();
-
-        if (!insertError) {
-          console.log(`✅ Created profile for ${userId}`);
-          return displayName;
-        }
-      } catch (insertErr) {
-        // Profile might already exist, just use email as fallback
-        console.log(`ℹ️  Using email as display name for ${userId}`);
-        return displayName;
-      }
+      const displayName = email.split('@')[0];
+      console.log(`ℹ️  No profile found. Using email (${displayName}) as display name for ${userId}`);
+      return displayName;
     }
 
     // Final fallback: use user ID
-    console.warn(`⚠️  Could not fetch or create profile for ${userId}`);
+    console.log(`ℹ️  Using user ID as display name for ${userId}`);
     return userId;
   } catch (err) {
-    console.warn(`⚠️  Error handling display name: ${err instanceof Error ? err.message : String(err)}`);
-    return email ? email.split('@')[0] : userId; // Use email or ID as last resort
+    console.warn(`⚠️  Error fetching profile: ${err instanceof Error ? err.message : String(err)}`);
+    return email ? email.split('@')[0] : userId; // Use email or ID as fallback
   }
 }
