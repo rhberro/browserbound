@@ -1,5 +1,5 @@
 import { Room, Client } from 'colyseus';
-import { jwtVerify } from 'jose';
+import { jwtVerify, createRemoteJWKSet } from 'jose';
 import {
   GRAVITY, WIND_INTEGRATION, TerrainOp, MAP_WIDTH, MAP_HEIGHT,
   DEFAULT_CRATER_RADIUS, applyOpToBitmap, collapseLips, appendOp, PLAYER_HEIGHT,
@@ -62,42 +62,43 @@ interface AuthPayload {
 }
 
 export class GameRoom extends Room {
+  private static jwks: ReturnType<typeof createRemoteJWKSet> | null = null;
+
+  private static getJWKS() {
+    if (!GameRoom.jwks) {
+      const supabaseUrl = process.env.SUPABASE_URL;
+      if (!supabaseUrl) {
+        throw new Error('SUPABASE_URL not configured');
+      }
+      // Supabase provides JWKS endpoint for verifying ES256 tokens
+      GameRoom.jwks = createRemoteJWKSet(
+        new URL(`${supabaseUrl}/auth/v1/.well-known/jwks.json`)
+      );
+    }
+    return GameRoom.jwks;
+  }
+
   /**
    * Colyseus 0.18 onAuth: Validates client JWT token before room join.
    *
    * Called with: (client, options, context)
-   * - options.auth contains the JWT token from client
-   * - Supabase uses ES256 (elliptic curve) signing, not HS256
+   * - options.auth contains the JWT token from client (Supabase JWT)
+   * - Supabase uses ES256 (elliptic curve) signing
+   * - Verification uses Supabase's public keys from JWKS endpoint
    */
   async onAuth(client: any, options: any, context: any) {
     try {
-      // Extract token from options.auth (not passed as first parameter)
+      // Extract token from options.auth
       const token = options?.auth;
 
       if (!token) {
         throw new Error('No authentication token provided');
       }
 
-      const secretString = process.env.SUPABASE_JWT_SECRET || '';
-      if (!secretString) {
-        throw new Error('SUPABASE_JWT_SECRET not configured');
-      }
-
-      // Supabase JWT secret format: sb_secret_<base64-encoded-value>
-      // For ES256 verification, we use the secret as-is
-      let secretBytes: Uint8Array;
-
-      if (secretString.startsWith('sb_secret_')) {
-        // Extract and base64-decode the secret part
-        const base64Part = secretString.substring('sb_secret_'.length);
-        secretBytes = new Uint8Array(Buffer.from(base64Part, 'base64'));
-      } else {
-        // Fallback: treat as raw secret
-        secretBytes = new TextEncoder().encode(secretString);
-      }
-
-      // jwtVerify handles ES256 automatically based on JWT header
-      const verified = await jwtVerify(token, secretBytes);
+      // Verify token using Supabase's JWKS endpoint
+      // This is the standard OAuth/OIDC way to verify ES256 tokens
+      const jwks = GameRoom.getJWKS();
+      const verified = await jwtVerify(token, jwks);
       const sub = (verified.payload.sub as string) || '';
 
       if (!sub) {
