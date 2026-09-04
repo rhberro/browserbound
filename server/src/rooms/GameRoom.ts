@@ -64,12 +64,29 @@ interface AuthPayload {
 export class GameRoom extends Room {
   static async onAuth(token: string) {
     try {
-      const secret = new TextEncoder().encode(process.env.SUPABASE_JWT_SECRET || '');
-      if (secret.length === 0) {
+      if (!token) {
+        throw new Error('No authentication token provided');
+      }
+
+      const secretString = process.env.SUPABASE_JWT_SECRET || '';
+      if (!secretString) {
         throw new Error('SUPABASE_JWT_SECRET not configured');
       }
 
-      const verified = await jwtVerify(token, secret);
+      // Supabase secret format: sb_secret_<base64-encoded-value>
+      // Extract the actual base64 part and decode it
+      let secretBytes: Uint8Array;
+
+      if (secretString.startsWith('sb_secret_')) {
+        // Decode the base64 part after "sb_secret_"
+        const base64Part = secretString.substring('sb_secret_'.length);
+        secretBytes = new Uint8Array(Buffer.from(base64Part, 'base64'));
+      } else {
+        // Fallback: treat the entire string as the secret
+        secretBytes = new TextEncoder().encode(secretString);
+      }
+
+      const verified = await jwtVerify(token, secretBytes);
       const sub = (verified.payload.sub as string) || '';
 
       if (!sub) {
