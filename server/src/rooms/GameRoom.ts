@@ -15,6 +15,7 @@ import { PhysicsAdapter, Wind } from '@browserbond/shared/src/adapters/PhysicsAd
 import { MessageValidationAdapter } from '@browserbond/shared/src/adapters/MessageValidationAdapter';
 import { WindManager } from '../adapters/WindManager';
 import { fetchDisplayName } from '../adapters/SupabaseAdmin';
+import { PlayerLifecycle } from './PlayerLifecycle';
 import { shouldAdvanceTurn, nothingInFlight } from './turnLoop';
 import { advanceTimer, windupElapsed, fallDelayElapsed, nextFallSpeed } from './gait';
 import { loadMap, loadRandomMap, LoadedMap } from '../adapters/MapLoader';
@@ -128,7 +129,12 @@ export class GameRoom extends Room {
   state = new RoomState();
   private terrainBitmap: Uint8Array = new Uint8Array(MAP_WIDTH * MAP_HEIGHT);
   private terrainOps: TerrainOp[] = [];
-  private playerInputs: Map<string, { left: boolean; right: boolean; jump: boolean }> = new Map();
+  /**
+   * Every piece of per-session state outside synchronized schema: held
+   * input, walk windup, fall delay, wind drift and the blocked-notify
+   * debounce flag. See PlayerLifecycle's own doc comment.
+   */
+  private lifecycle: PlayerLifecycle = new PlayerLifecycle();
   /**
    * Projectiles staged to launch on a later frame (Burst fires at 0, 5, 10).
    * Deliberately NOT in synchronized state: they do not exist in the world yet,
@@ -140,8 +146,6 @@ export class GameRoom extends Room {
   private windManager!: WindManager;
   private validator!: MessageValidationAdapter;
   private lastPlayerId: string = '';
-  /** Players already told they are against a wall, to debounce the cue. */
-  private blockedNotified: Set<string> = new Set();
   /**
    * Epoch ms at which the current turn passes. Server-side only: clients get a
    * remaining duration instead, because their clocks do not agree with this one.
@@ -156,22 +160,6 @@ export class GameRoom extends Room {
   private matchStarted: boolean = false;
   /** A character left the field this frame; re-check the match at frame end. */
   private matchEndDirty: boolean = false;
-  /**
-   * Milliseconds a direction has been held, per player. A character takes no
-   * step until this passes WALK_WINDUP_MS, and — crucially — it is NOT reset by
-   * taking a step. It is a one-time hesitation on key-down followed by a steady
-   * crawl, which is what GunBound's `sidewaysDelayTimer` does. Resetting it per
-   * step instead would produce a 10 px/s character.
-   */
-  private walkWindup: Map<string, number> = new Map();
-  /** Milliseconds a character has been unsupported. Gravity waits FALL_DELAY_MS. */
-  private fallDelay: Map<string, number> = new Map();
-  /**
-   * Sub-pixel wind drift accumulated over a fall, clamped to +/-1 and spent as
-   * whole pixels. Weak wind nudges a long fall now and then rather than sliding
-   * it continuously.
-   */
-  private windDrift: Map<string, number> = new Map();
   private map!: LoadedMap;
 
   constructor() {
@@ -272,7 +260,7 @@ export class GameRoom extends Room {
         console.warn(`[Move] ${validation.reason} from ${client.sessionId}`);
         return;
       }
-      this.playerInputs.set(client.sessionId, data);
+      this.lifecycle.setInput(client.sessionId, data);
     });
 
     this.onMessage('aimAngle', (client, data: { angle: number }) => {
@@ -312,7 +300,7 @@ export class GameRoom extends Room {
       // Firing costs tempo: add the weapon's delay NOW, before the turn passes,
       // so the next-turn owner is chosen against the cost just paid (issue #35).
       player.delay += weapon.delayCost;
-      this.blockedNotified.delete(client.sessionId);
+      this.lifecycle.clearBlockedNotified(client.sessionId);
 
       for (const spec of projectileSpecs) {
         const vel = this.physics.createProjectile(spec.angle, data.power, weapon.mass);
@@ -444,11 +432,7 @@ export class GameRoom extends Room {
     this.matchStarted = false;
     this.terrainOps = [];
     this.pendingProjectiles = [];
-    this.walkWindup.clear();
-    this.fallDelay.clear();
-    this.windDrift.clear();
-    this.blockedNotified.clear();
-    this.playerInputs.clear();
+    this.lifecycle.clearAll();
     this.currentFrame = 0;
     this.initializeTerrainPlatform();
     this.publishWind();
@@ -492,11 +476,7 @@ export class GameRoom extends Room {
     this.state.projectiles.clear();
     this.pendingProjectiles = [];
     this.state.players.clear();
-    this.playerInputs.clear();
-    this.walkWindup.clear();
-    this.fallDelay.clear();
-    this.windDrift.clear();
-    this.blockedNotified.clear();
+    this.lifecycle.clearAll();
     this.currentFrame = 0;
 
     let spawnIndex = 0;
@@ -811,12 +791,12 @@ export class GameRoom extends Room {
         // Airborne. Ground destroyed under the feet lands here on the next
         // frame with no special case.
         player.airborne = true;
-        this.walkWindup.delete(playerId);
+        this.lifecycle.clearWalkWindup(playerId);
 
         // The hang. Gravity does nothing for FALL_DELAY_MS, which is what makes
         // ground collapsing underfoot read as a beat rather than a snap.
-        const hung = advanceTimer(this.fallDelay.get(playerId) ?? 0, SIMULATION_INTERVAL_MS);
-        this.fallDelay.set(playerId, hung);
+        const hung = advanceTimer(this.lifecycle.getFallDelay(playerId), SIMULATION_INTERVAL_MS);
+        this.lifecycle.setFallDelay(playerId, hung);
         if (!fallDelayElapsed(hung)) {
           player.vy = 0;
         } else {
@@ -843,23 +823,23 @@ export class GameRoom extends Room {
             player.airborne = false;
             // Facing sign is deliberately preserved: a character must not
             // silently turn around because it landed.
-            this.fallDelay.delete(playerId);
-            this.windDrift.delete(playerId);
+            this.lifecycle.clearFallDelay(playerId);
+            this.lifecycle.clearWindDrift(playerId);
           }
         }
       } else {
         player.vy = 0;
         player.vx = 0;
         player.airborne = false;
-        this.fallDelay.delete(playerId);
-        this.windDrift.delete(playerId);
+        this.lifecycle.clearFallDelay(playerId);
+        this.lifecycle.clearWindDrift(playerId);
         // A blocked run does not survive a fall: a character that walked into a
         // wall, was blasted loose and landed against another one must be told
         // again. Cleared here rather than only on the walking path below, which
         // a falling character never reaches.
-        this.blockedNotified.delete(playerId);
+        this.lifecycle.clearBlockedNotified(playerId);
 
-        const input = this.playerInputs.get(playerId);
+        const input = this.lifecycle.getInput(playerId);
         const isCurrent = playerId === this.state.currentPlayerId;
         const dir = input?.left ? -1 : input?.right ? 1 : 0;
 
@@ -875,8 +855,8 @@ export class GameRoom extends Room {
           // The wind-up. Held time accumulates and is spent only on the first
           // step; from then on it stays above the threshold and every tick
           // steps. Releasing the direction is the only thing that resets it.
-          const held = advanceTimer(this.walkWindup.get(playerId) ?? 0, SIMULATION_INTERVAL_MS);
-          this.walkWindup.set(playerId, held);
+          const held = advanceTimer(this.lifecycle.getWalkWindup(playerId), SIMULATION_INTERVAL_MS);
+          this.lifecycle.setWalkWindup(playerId, held);
 
           if (windupElapsed(held)) {
             const result = walkStep(this.terrainBitmap, MAP_WIDTH, MAP_HEIGHT, body, dir);
@@ -885,24 +865,24 @@ export class GameRoom extends Room {
               // The budget is a STEP COUNT. A blocked step costs nothing, and
               // walking off a ledge costs the step that took you over it.
               player.movementBudget -= 1;
-              this.blockedNotified.delete(playerId);
+              this.lifecycle.clearBlockedNotified(playerId);
             } else if (result === 'fell') {
               player.movementBudget -= 1;
               player.vy = 0;
               player.airborne = true;
-              this.blockedNotified.delete(playerId);
+              this.lifecycle.clearBlockedNotified(playerId);
             } else {
               // Once per blocked run, not once per frame: a player holding a
               // direction against a wall would otherwise flood the channel.
-              if (!this.blockedNotified.has(playerId)) {
-                this.blockedNotified.add(playerId);
+              if (!this.lifecycle.isBlockedNotified(playerId)) {
+                this.lifecycle.setBlockedNotified(playerId);
                 this.broadcast('unableToMove', { playerId, x: body.x, y: body.y });
               }
             }
           }
         } else {
-          this.walkWindup.delete(playerId);
-          if (dir === 0) this.blockedNotified.delete(playerId);
+          this.lifecycle.clearWalkWindup(playerId);
+          if (dir === 0) this.lifecycle.clearBlockedNotified(playerId);
         }
       }
 
@@ -954,9 +934,9 @@ export class GameRoom extends Room {
     // ONE accumulator for both forces. Truncating each independently loses its
     // remainder every tick, which under-delivers a knockback by up to a pixel
     // per tick and drops a sub-pixel one entirely.
-    const carried = (this.windDrift.get(playerId) ?? 0) + vx + windAx * WIND_DRIFT_SCALE;
+    const carried = this.lifecycle.getWindDrift(playerId) + vx + windAx * WIND_DRIFT_SCALE;
     const pixels = Math.trunc(carried);
-    this.windDrift.set(playerId, carried - pixels);
+    this.lifecycle.setWindDrift(playerId, carried - pixels);
 
     const step = Math.sign(pixels);
     for (let i = 0; i < Math.abs(pixels); i++) {
@@ -965,7 +945,7 @@ export class GameRoom extends Room {
         // is the bounce, and carrying the remainder would grind the character
         // along the face for the rest of the fall.
         player.vx = 0;
-        this.windDrift.set(playerId, 0);
+        this.lifecycle.setWindDrift(playerId, 0);
         return;
       }
       body.x += step;
@@ -1013,8 +993,8 @@ export class GameRoom extends Room {
     player.y = body.y;
     // A fresh blast restarts the hang, so a character shoved off a ledge gets
     // the same beat before dropping as one whose ground vanished.
-    this.fallDelay.delete(playerId);
-    this.windDrift.delete(playerId);
+    this.lifecycle.clearFallDelay(playerId);
+    this.lifecycle.clearWindDrift(playerId);
   }
 
   /**
@@ -1032,8 +1012,8 @@ export class GameRoom extends Room {
     }
     this.turnEndsAtMs = Date.now() + TURN_TIME_MS;
     this.publishTurnClock();
-    this.walkWindup.delete(playerId);
-    this.blockedNotified.delete(playerId);
+    this.lifecycle.clearWalkWindup(playerId);
+    this.lifecycle.clearBlockedNotified(playerId);
   }
 
   /**
@@ -1118,19 +1098,16 @@ export class GameRoom extends Room {
    * The ONE permanent-departure path: death, a deliberate leave, and a
    * reconnection window that ran out all end here.
    *
-   * Every per-player map is released together, in one place, because they were
-   * previously released in three places that each forgot a different one.
-   * Anything keyed by session id belongs in this method.
+   * Delegates its runtime-state cleanup to PlayerLifecycle.remove, which is
+   * itself the one place every per-session map is released together — they
+   * used to be released across three call sites here, each of which forgot a
+   * different one.
    */
   private removePlayer(playerId: string) {
     if (!this.state.players.has(playerId)) return;
 
     this.state.players.delete(playerId);
-    this.playerInputs.delete(playerId);
-    this.walkWindup.delete(playerId);
-    this.fallDelay.delete(playerId);
-    this.windDrift.delete(playerId);
-    this.blockedNotified.delete(playerId);
+    this.lifecycle.leave(playerId, false);
 
     // NOT checked here. Two characters can die in the same frame — a splash
     // kill plus an out-of-bounds death, or both crossing the Kill Boundary —
@@ -1216,6 +1193,7 @@ export class GameRoom extends Room {
     seat.connected = true;
 
     this.state.seats.set(client.sessionId, seat);
+    this.lifecycle.join(client.sessionId, seat);
 
     // First joiner becomes the host
     if (this.state.hostSessionId === '') {
@@ -1243,11 +1221,7 @@ export class GameRoom extends Room {
    * the largest thing a room holds.
    */
   onDispose() {
-    this.playerInputs.clear();
-    this.walkWindup.clear();
-    this.fallDelay.clear();
-    this.windDrift.clear();
-    this.blockedNotified.clear();
+    this.lifecycle.clearAll();
     this.pendingProjectiles = [];
     this.terrainOps = [];
     this.terrainBitmap = new Uint8Array(0);
@@ -1268,7 +1242,7 @@ export class GameRoom extends Room {
 
     // They are not holding a key any more. Without this a player who
     // disconnects mid-walk keeps walking.
-    this.playerInputs.delete(client.sessionId);
+    this.lifecycle.leave(client.sessionId, true);
     player.connected = false;
 
     try {
@@ -1283,6 +1257,8 @@ export class GameRoom extends Room {
 
   /** They made it back inside the window. */
   async onReconnect(client: Client) {
+    this.lifecycle.reconnect(client.sessionId);
+
     const player = this.state.players.get(client.sessionId);
     if (player) {
       player.connected = true;
@@ -1310,8 +1286,6 @@ export class GameRoom extends Room {
    * a deliberate leave and for a drop whose window expired.
    */
   async onLeave(client: Client) {
-    this.playerInputs.delete(client.sessionId);
-
     this.removePlayer(client.sessionId);
   }
 }
