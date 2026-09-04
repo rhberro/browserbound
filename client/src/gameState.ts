@@ -535,7 +535,7 @@ export class GameState {
     } as any);
 
     this.setupRoomHandlers();
-    return (this.room as any).roomId || '';
+    return this.room.id || '';
   }
 
   async joinRoom(roomId: string): Promise<void> {
