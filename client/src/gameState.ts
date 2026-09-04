@@ -551,7 +551,6 @@ export class GameState {
       roomName: options.roomName,
       ffaCount: options.ffaCount,
       userId: session.user.id,
-      displayName: session.user.user_metadata?.display_name || session.user.email,
       auth: session.access_token,
     } as any);
 
@@ -565,7 +564,6 @@ export class GameState {
 
     this.room = await this.client.joinById(roomId, {
       userId: session.user.id,
-      displayName: session.user.user_metadata?.display_name || session.user.email,
       auth: session.access_token,
     } as any);
 

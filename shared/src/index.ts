@@ -5,4 +5,5 @@ export * from './characterPhysics';
 export * from './aim';
 export * from './schema';
 export * from './modes';
+export * from './displayName';
 export * from './adapters/WeaponConfigAdapter';

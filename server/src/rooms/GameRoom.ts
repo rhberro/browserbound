@@ -108,7 +108,7 @@ export class GameRoom extends Room {
 
       // Fetch or create display name from Supabase profiles
       const email = verified.payload.email as string;
-      const displayName = await fetchDisplayName(sub, email);
+      const displayName = await fetchDisplayName(sub, client.sessionId, email);
 
       // Return auth data that becomes client.auth in onJoin
       return {
@@ -1187,7 +1187,14 @@ export class GameRoom extends Room {
     const seat = new Seat();
     seat.sessionId = client.sessionId;
     seat.userId = options?.userId || '';
-    seat.displayName = options?.displayName || `Player ${client.sessionId.substring(0, 4)}`;
+    // The resolver-backed value from onAuth, NOT options.displayName — that
+    // would be the client's own unverified claim. onAuth already resolved a
+    // real display name (DB profile, then email, then userId, then a
+    // sessionId fallback); this is the one place that value is meant to
+    // land. `client.auth` is guaranteed here because onAuth runs before
+    // onJoin for every connection — the OR is defense against `any`-typed
+    // auth data, not an expected path.
+    seat.displayName = client.auth?.displayName || `Player ${client.sessionId.substring(0, 4)}`;
     seat.seatIndex = -1; // Start unclaimed
     seat.ready = false;
     seat.connected = true;
