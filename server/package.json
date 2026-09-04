@@ -15,6 +15,7 @@
     "@colyseus/ws-transport": "^0.18.2",
     "@supabase/supabase-js": "^2.45.0",
     "colyseus": "^0.18.5",
+    "dotenv": "^16.0.0",
     "express": "^5.2.1",
     "jose": "^5.2.0",
     "pngjs": "^7.0.0"

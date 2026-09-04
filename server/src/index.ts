@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import { defineServer, defineRoom, LobbyRoom } from 'colyseus';
 import { WebSocketTransport } from '@colyseus/ws-transport';
 import { GameRoom } from './rooms/GameRoom';
