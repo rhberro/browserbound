@@ -311,31 +311,113 @@ trusted.
 
 ### Match Phase
 
-A match is either **playing** or **ended**. It ends when fewer than two characters remain, at which
-point turn passing, the turn clock and wind changes all stop — with one character left there is
-nobody to pass the turn to, and a lone survivor otherwise plays on indefinitely.
+A match has three phases: **lobby**, **playing**, and **ended**.
 
-The **winner** is the single survivor. Two characters dying in the same exchange is a **draw**, and
-is reported as one: a winner is only ever named when there is genuinely one character left, never
-inferred from whoever happens to remain. Because deaths can land in the same frame, the outcome is
-decided once at the end of a frame rather than on each removal.
+**Lobby** is the pre-game phase where players join and prepare. A room remains in lobby until the
+host triggers `startGame()`. All player actions here are seat claims, ready toggles, and game start —
+nothing hits the terrain or the turn clock. The match becomes unresponsive to new joins once it starts:
+the room is **locked** at first play, and no backfill of dropped players happens.
 
-A match only becomes endable once it has had two characters at the same time; before the second
-player arrives, one character is a room waiting to fill.
+**Playing** is the active match. It begins when the first player takes a turn. Turn passing, the turn
+clock, wind changes, and projectiles all run. It ends when fewer than two characters remain, at which
+point turn passing, the turn clock and wind changes all stop.
 
-### Rematch
+**Ended** signals match completion. When a match reaches this phase, the game transitions back to
+lobby after a brief delay so players can see the result and prepare for the next match. The room
+becomes available for joining again.
 
-A finished match can be restarted **without anyone reconnecting**: a new map, full health, spawns
-reassigned, terrain log cleared, for whoever is still in the room. Every connected player must ask,
-and the tally is recomputed when someone leaves as well as when someone asks, so one player's
-departure cannot hold the room in a finished match. A player inside a Reconnection Window is
-counted as still here, so a rematch cannot start without them and leave them stranded on arrival.
+The **winning team** is the last team with living characters. Two teams eliminating each other in the
+same exchange results in a **draw**, with `winningTeamId = -1`. A team is only reported as winner
+when there is genuinely one team with characters left, never inferred from whoever happens to remain.
+Because deaths can land in the same frame, the outcome is decided once at the end of a frame rather
+than on each removal.
+
+A match only becomes endable once it has had two or more characters at the same time; before enough
+players arrive, a single character is in a room waiting to fill.
 
 ### Turn Clock
 
 The time left in the current turn, published as a **remaining duration** rather than a deadline.
 A deadline would require the client's clock to agree with the server's, and a countdown computed
 from a skewed clock is wrong by the skew for as long as the skew lasts.
+
+### Team
+
+A **Team** is a group of players who win or lose together. The team a **Seat** belongs to is derived
+from its index: `teamId = floor(seatIndex / teamSize)`. Teams are never stored explicitly — they are
+computed from seat geometry and game mode.
+
+Example: in a 2v2 game (2 teams, 2 players per team):
+- Seats 0–1 belong to Team 0
+- Seats 2–3 belong to Team 1
+
+A match ends when only one team has characters remaining. Team-based win conditions replace individual
+winner tracking from earlier versions.
+
+### Seat
+
+A **Seat** is a pre-match identity and slot in the lobby. It differs from a **Player**, which exists
+only during the active match ('playing' phase) and holds game state like position, health, and aim.
+
+A Seat holds:
+- **seatIndex**: Position in the room (determines team via `floor(seatIndex / teamSize)`)
+- **sessionId**: Colyseus client session (persists across reconnect)
+- **userId**: Supabase auth user (who the person is)
+- **displayName**: User's chosen name
+- **ready**: Boolean toggle set in lobby, reset to false on return from match
+- **connected**: Connection status (dropped players stay in lobby until reconnect window expires)
+
+When `startGame()` is called, each claimed seat spawns a Player with inherited identity. When the
+match ends and returns to lobby, players are destroyed but seats remain, allowing the next match to
+start without re-claiming.
+
+### Ready State
+
+The **Ready State** is a boolean toggle each player sets in the lobby to signal they are prepared to
+start. All seats must be claimed and all players must be ready before the host can trigger `startGame()`.
+
+Ready state is reset to `false` when returning to lobby after a match ends, so a new match requires
+re-readying even if the same players remain in the room.
+
+### Player Identity
+
+Two separate identities track a player across session boundaries:
+
+- **sessionId** (Colyseus-assigned): Unique per client connection. A disconnected player who reconnects
+  within the Reconnection Window keeps their session ID and their character.
+- **userId** (Supabase-assigned): The authenticated user. Used for persistence and accounts, but
+  reconnection is session-based, not user-based, so a user can abandon a match and rejoin via a new
+  client session without restoring their character.
+
+A player is identified by **sessionId** in-match and at the seat level in-lobby. The user account
+(userId) is metadata: the server verifies it via JWT, stores it in the Seat, but routing turns and
+messages always keys off sessionId.
+
+### Room Lock
+
+A game room is **locked** immediately when it transitions from 'lobby' to 'playing'. Once locked:
+- No new players may join
+- No backfill of dropped players happens — if a player disconnects and their reconnection window
+  expires, no one takes their seat
+
+A locked room becomes unlocked when it returns to 'lobby' phase, allowing new players to join for the
+next match.
+
+### Lobby Scene vs LobbyRoom
+
+These are two separate concepts and easy to conflate:
+
+**LobbyRoom** (`server/rooms/LobbyRoom.ts`) is a Colyseus matchmaking room type. It holds no game
+state; it exists solely to list all currently running game rooms so clients can discover and join them.
+It is a Colyseus pattern.
+
+**Lobby Scene** (client `Lobby.tsx` screen, server `matchPhase: 'lobby'` state) is the pre-game state
+within a game room where players claim seats and ready up. The Lobby Scene uses the room's synchronized
+state to render the seat grid and ready buttons. It is part of the match lifecycle, not a separate
+matchmaking mechanism.
+
+A client discovers a game room via LobbyRoom, then joins that room and enters the Lobby Scene to
+prepare. The two are separate layers: matchmaking discovery vs. pre-match preparation.
 
 ### Terrain Op Log
 

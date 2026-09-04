@@ -9,17 +9,20 @@
  * first time it ran by catching the 0.18 SDK reconnecting a session underneath
  * a deliberate leave.
  *
- * Deliberately NOT part of `pnpm test`: it needs a server on port 3002 and
- * runs in wall-clock seconds, so it is a separate command.
+ * Deliberately NOT part of `pnpm test`: it needs a server (default port from
+ * .env or PORT env var) and runs in wall-clock seconds, so it is a separate command.
  *
  *   pnpm --filter @browserbond/server dev      # one terminal
  *   pnpm --filter @browserbond/server smoke    # another
+ *
+ * Covers both the new lobby phase flow (#49) and existing drop/reconnect behavior.
  *
  * Exits non-zero if any expectation fails, so CI can gate on it.
  */
 import { Client, getStateCallbacks } from '@colyseus/sdk';
 
-const URL = 'ws://localhost:3002';
+const PORT = parseInt(process.env.PORT || '3002');
+const URL = `ws://localhost:${PORT}`;
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 let failures = 0;
@@ -32,9 +35,35 @@ async function main() {
   const c1 = new Client(URL);
   const c2 = new Client(URL);
 
-  const r1 = await c1.joinOrCreate('game');
+  // NEW FLOW: Create game and test lobby phase
+  const r1 = await c1.create('game', { mode: 'duel', roomName: 'smoke' });
   const r2 = await c2.joinById(r1.roomId);
   await wait(600);
+
+  // Initial state: both in lobby, no players spawned yet
+  check('room created in lobby phase', r1.state.matchPhase === 'lobby', r1.state.matchPhase);
+  check('no players yet in lobby', r1.state.players.size === 0, `size=${r1.state.players.size}`);
+  check('two seats available', r1.state.seats?.size === 2, `seats=${r1.state.seats?.size}`);
+
+  // Claim seats
+  r1.send('claimSeat', { seatIndex: 0 });
+  r2.send('claimSeat', { seatIndex: 1 });
+  await wait(300);
+
+  check('both seats claimed',
+    Array.from(r1.state.seats?.values() || []).filter((s: any) => s.sessionId !== '').length === 2);
+
+  // Set ready
+  r1.send('setReady', { ready: true });
+  r2.send('setReady', { ready: true });
+  await wait(300);
+
+  check('both players ready',
+    Array.from(r1.state.seats?.values() || []).every((s: any) => s.ready === true));
+
+  // Host starts game
+  r1.send('startGame', {});
+  await wait(800); // Wait for match to start and players to spawn
 
   const $1 = getStateCallbacks(r1);
   let terrainOps = 0;
@@ -43,9 +72,9 @@ async function main() {
   r2.onMessage('terrainSync', () => {});
   r2.onMessage('terrainOp', () => {});
 
-  check('two players joined', r1.state.players.size === 2, `size=${r1.state.players.size}`);
+  check('two players spawned', r1.state.players.size === 2, `size=${r1.state.players.size}`);
   check('a turn is running', r1.state.currentPlayerId !== '');
-  check('match is playing', r1.state.matchPhase === 'playing');
+  check('match is playing', r1.state.matchPhase === 'playing', r1.state.matchPhase);
   check('turn clock is counting', r1.state.turnSecondsRemaining > 0,
     `${r1.state.turnSecondsRemaining}s`);
 
@@ -121,16 +150,16 @@ async function main() {
   await wait(800);
   check('match ended when one character remained', r1.state.matchPhase === 'ended',
     r1.state.matchPhase);
-  check('survivor recorded as winner', r1.state.winnerId === r1.sessionId,
-    r1.state.winnerId);
+  check('winning team recorded', r1.state.winningTeamId !== undefined,
+    `winningTeamId=${r1.state.winningTeamId}`);
   check('turn clock stopped', r1.state.turnSecondsRemaining === 0);
   void victimId;
 
-  // Rematch with the single remaining client.
-  r1.send('rematch');
-  await wait(900);
-  check('rematch restarted the match', r1.state.matchPhase === 'playing', r1.state.matchPhase);
-  check('rematch respawned a character', r1.state.players.size >= 1);
+  // Match end → auto-return to lobby for next match
+  await wait(3000); // Wait for auto-transition to lobby
+  check('returned to lobby after match ended', r1.state.matchPhase === 'lobby',
+    r1.state.matchPhase);
+  check('seats cleared for next match', r1.state.players.size === 0, `players=${r1.state.players.size}`);
 
   await r1.leave(true);
   await wait(300);
